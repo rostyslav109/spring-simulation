@@ -3,7 +3,7 @@ Oscillation Simulator Documentation · React + Canvas 2D
 
 ==================================================
 1. OVERVIEW
-
+============================
 
 This project is a spring-mass oscillator simulator based on Hooke’s Law.
 The system includes:
@@ -22,9 +22,10 @@ The architecture is divided into two layers:
 2. React Layer
    Components (App and Simulator) manage state, physics, and pass parameters to the renderer via refs.
 
+
 ==================================================
 2. CONSTANTS
-
+============================
 
 2.1 Design Resolution
 
@@ -56,7 +57,7 @@ DT = 1/60          — simulation time step (~16.67 ms)
 
 ==================================================
 3. PHYSICS MODEL
-
+============================
 
 3.1 Equation of Motion (Euler Method)
 
@@ -81,7 +82,7 @@ This is the point where the system stabilizes.
 
 ==================================================
 4. RENDERING
-
+============================
 
 Rendering order (drawScene):
 
@@ -114,7 +115,7 @@ drawArrow:
 
 ==================================================
 5. STATE AND REFS
-
+============================
 
 Problem: stale closure in requestAnimationFrame.
 
@@ -136,7 +137,7 @@ isDraggingRef (ref)
 
 ==================================================
 6. MOUSE INTERACTION
-
+============================
 
 mousedown  → start dragging
 mousemove  → move or hover
@@ -149,7 +150,7 @@ canvasY = (clientY − rect.top) * (canvasHeight / rect.height)
 
 ==================================================
 7. UI STRUCTURE
-
+============================
 
 Left panel   — 300 px
 Canvas       — center
@@ -157,7 +158,7 @@ Right panel  — 230 px
 
 ==================================================
 8. HELPER COMPONENTS
-
+============================
 
 ToggleButton — on/off switch
 Label        — section title
@@ -165,7 +166,7 @@ Divider      — horizontal separator
 
 ==================================================
 9. STYLES
-
+============================
 
 panelStyle
 bodyText
@@ -174,7 +175,7 @@ resetBtnStyle
 
 ==================================================
 10. FORMULAS
-
+============================
 
 F = −k * x
 x₀ = mg / k
@@ -183,7 +184,7 @@ f = 1 / T
 
 ==================================================
 11. PHYSICS SCALING (IMPORTANT)
-
+============================
 
 Why is GRAVITY = 980 instead of 9.8?
 
@@ -250,9 +251,7 @@ NOT:
 
 ==================================================
 12. FILE STRUCTURE
-
-
-SpringSimulator.jsx
+============================
 
 Constants
 
