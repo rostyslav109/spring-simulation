@@ -1,0 +1,485 @@
+import { useRef, useEffect, useState, useCallback } from 'react';
+
+const ANCHOR_X    = 456;
+const ANCHOR_Y    = 30;
+const REST_LENGTH = 140;
+const BLOCK_W     = 80;
+const BLOCK_H     = 80;
+const GRAVITY     = 980;
+const DT          = 1 / 60;
+
+function drawSpring(ctx, x, topY, bottomY, k) {
+  const t         = (k - 1) / (10 - 1);
+  const coils     = Math.round(12 - t * 6);
+  const amplitude = 15 + t * 35;
+  const thickness = 2 + t * 4;
+  const segH      = (bottomY - topY) / (coils + 1);
+
+  ctx.beginPath();
+  ctx.moveTo(x, topY);
+  for (let i = 0; i <= coils; i++) {
+    const yMid  = topY + segH * (i + 0.5);
+    const xOff  = (i % 2 === 0) ? amplitude : -amplitude;
+    const yNext = topY + segH * (i + 1);
+    ctx.quadraticCurveTo(x + xOff, yMid, x, yNext);
+  }
+  const grad = ctx.createLinearGradient(x - amplitude, topY, x + amplitude, bottomY);
+  grad.addColorStop(0, '#555');
+  grad.addColorStop(0.5, '#3e434b');
+  grad.addColorStop(1, '#999');
+  ctx.strokeStyle = grad;
+  ctx.lineWidth   = thickness;
+  ctx.lineJoin    = 'round';
+  ctx.lineCap     = 'round';
+  ctx.stroke();
+
+  ctx.beginPath();
+  ctx.moveTo(x - thickness / 2, topY);
+  for (let i = 0; i <= coils; i++) {
+    const yMid  = topY + segH * (i + 0.5);
+    const xOff  = (i % 2 === 0) ? amplitude * 0.6 : -amplitude * 0.6;
+    const yNext = topY + segH * (i + 1);
+    ctx.quadraticCurveTo(x - thickness / 2 + xOff, yMid, x - thickness / 2, yNext);
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+  ctx.lineWidth = 1;
+  ctx.stroke();
+}
+
+function drawBlock(ctx, blockX, blockY, isDragging, massKg) {
+  const size      = 40 + ((massKg - 0.05) / (0.3 - 0.05)) * 50;
+  const w = size, h = size;
+  const centeredX = blockX + (BLOCK_W - w) / 2;
+  const gradient  = ctx.createLinearGradient(centeredX, blockY, centeredX + w, blockY);
+  if (isDragging) {
+    gradient.addColorStop(0, '#fff1c1');
+    gradient.addColorStop(0.2, '#facc7a');
+    gradient.addColorStop(0.5, '#f59e0b');
+    gradient.addColorStop(1, '#ea8c00');
+  } else {
+    gradient.addColorStop(0, '#ffe8b5');
+    gradient.addColorStop(0.25, '#fbc87c');
+    gradient.addColorStop(0.55, '#f59e0b');
+    gradient.addColorStop(1, '#d97706');
+  }
+  ctx.fillStyle = gradient;
+  ctx.beginPath();
+  ctx.roundRect(centeredX, blockY, w, h, 6);
+  ctx.fill();
+  ctx.strokeStyle = '#000';
+  ctx.lineWidth   = 0.8;
+  ctx.beginPath();
+  ctx.roundRect(centeredX, blockY, w, h, 6);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(0,0,0,0.89)';
+  ctx.font      = `${Math.round((10 + size / 10) / 1.25)}px system-ui`;
+  ctx.textAlign = 'center';
+  ctx.fillText(`${(massKg * 1000).toFixed(0)}g`, centeredX + w / 2, blockY + h / 2 + 5);
+}
+
+function drawCeilingBracket(ctx) {
+  const w = 100, h = 18;
+  const x = ANCHOR_X - w / 2;
+  const y = ANCHOR_Y - h;
+  const grad = ctx.createLinearGradient(x, y, x, y + h);
+  grad.addColorStop(0, '#1e3a8a');
+  grad.addColorStop(0.5, '#2563eb');
+  grad.addColorStop(1, '#3b82f6');
+  ctx.fillStyle = grad;
+  ctx.beginPath();
+  ctx.roundRect(x, y, w, h, 4);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.4)';
+  ctx.lineWidth   = 1;
+  for (let i = 0; i < 9; i++) {
+    const hx = x + 4 + i * 12;
+    ctx.beginPath();
+    ctx.moveTo(hx, y);
+    ctx.lineTo(hx - 8, ANCHOR_Y);
+    ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(255,255,255,0.6)';
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, ANCHOR_Y);
+  ctx.lineTo(x + w, ANCHOR_Y);
+  ctx.stroke();
+  ctx.strokeStyle = 'rgba(0,0,0,0.15)';
+  ctx.lineWidth   = 2;
+  ctx.beginPath();
+  ctx.moveTo(x, y + h);
+  ctx.lineTo(x + w, y + h);
+  ctx.stroke();
+}
+
+function drawScene(ctx, canvas, blockY, isDragging, k, mass, showEqLine) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#f8fafc';
+  ctx.beginPath();
+  ctx.roundRect(0, 0, canvas.width, canvas.height, 10);
+  ctx.fill();
+  ctx.strokeStyle = '#cbd5e1';
+  ctx.lineWidth   = 1;
+  ctx.beginPath();
+  ctx.roundRect(0, 0, canvas.width, canvas.height, 10);
+  ctx.stroke();
+  ctx.fillStyle = 'rgba(180,186,194,0.19)';
+  for (let y = 14; y < canvas.height - 6; y += 22) {
+    for (let x = 14; x < canvas.width - 6; x += 22) {
+      ctx.beginPath();
+      ctx.arc(x, y, 1.2, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+  drawCeilingBracket(ctx);
+  drawSpring(ctx, ANCHOR_X, ANCHOR_Y, blockY, k);
+  ctx.fillStyle = '#1e293b';
+  ctx.beginPath();
+  ctx.arc(ANCHOR_X, blockY, 5, 0, Math.PI * 2);
+  ctx.fill();
+  if (showEqLine) {
+    const size          = 40 + ((mass - 0.05) / (0.3 - 0.05)) * 50;
+    const eqY           = ANCHOR_Y + REST_LENGTH + (mass * GRAVITY) / k;
+    const centerOfBlock = eqY + size / 2;
+    ctx.setLineDash([20, 25]);
+    ctx.strokeStyle = '#0c0d0f';
+    ctx.lineWidth   = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(350, centerOfBlock);
+    ctx.lineTo(canvas.width - 350, centerOfBlock);
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+  drawBlock(ctx, ANCHOR_X - BLOCK_W / 2, blockY, isDragging, mass);
+  if (isDragging) {
+    ctx.fillStyle = 'rgba(120,80,0,0.6)';
+    ctx.font      = '11px Georgia, serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('release to drop', ANCHOR_X, blockY + BLOCK_H + 18);
+  }
+}
+
+export default function App() {
+  const canvasRef     = useRef(null);
+  const [stiffness, setStiffness] = useState(5);
+  const [mass, setMass]           = useState(0.1);
+  const [showEqLine, setShowEqLine] = useState(true);
+
+  const stiffnessRef  = useRef(stiffness);
+  const massRef       = useRef(mass);
+  const posYRef       = useRef(ANCHOR_Y + REST_LENGTH + (mass * GRAVITY) / stiffness);
+  const velYRef       = useRef(0);
+  const isDraggingRef = useRef(false);
+  const showEqLineRef = useRef(true);
+
+  useEffect(() => { stiffnessRef.current = stiffness; }, [stiffness]);
+  useEffect(() => { massRef.current = mass; }, [mass]);
+  useEffect(() => { showEqLineRef.current = showEqLine; }, [showEqLine]);
+
+  const resetSpring = useCallback(() => {
+    posYRef.current = ANCHOR_Y + REST_LENGTH + (massRef.current * GRAVITY) / stiffnessRef.current;
+    velYRef.current = 0;
+  }, []);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx    = canvas.getContext('2d');
+
+    function getMouseY(e) {
+      const rect = canvas.getBoundingClientRect();
+      return (e.clientY - rect.top) * (canvas.height / rect.height);
+    }
+    function getMouseX(e) {
+      const rect = canvas.getBoundingClientRect();
+      return (e.clientX - rect.left) * (canvas.width / rect.width);
+    }
+    function isOverBlock(mx, my) {
+      const m    = massRef.current;
+      const size = 40 + ((m - 0.05) / (0.3 - 0.05)) * 50;
+      const bx   = ANCHOR_X - BLOCK_W / 2 + (BLOCK_W - size) / 2;
+      return my >= posYRef.current - 10 && my <= posYRef.current + size + 10
+          && mx >= bx - 10 && mx <= bx + size + 10;
+    }
+    function onMouseDown(e) {
+      if (isOverBlock(getMouseX(e), getMouseY(e))) {
+        isDraggingRef.current = true;
+        canvas.style.cursor   = 'grabbing';
+      }
+    }
+    function onMouseMove(e) {
+      const my = getMouseY(e), mx = getMouseX(e);
+      if (!isDraggingRef.current) {
+        canvas.style.cursor = isOverBlock(mx, my) ? 'grab' : 'default';
+        return;
+      }
+      posYRef.current = my - BLOCK_H / 2;
+      velYRef.current = 0;
+    }
+    function onMouseUp() {
+      isDraggingRef.current = false;
+      canvas.style.cursor   = 'default';
+    }
+
+    canvas.addEventListener('mousedown', onMouseDown);
+    canvas.addEventListener('mousemove', onMouseMove);
+    canvas.addEventListener('mouseup',   onMouseUp);
+
+    let animId;
+    function animate() {
+      if (!isDraggingRef.current) {
+        const k       = stiffnessRef.current;
+        const m       = massRef.current;
+        const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH;
+        const accY    = ((-k * stretch) + m * GRAVITY) / m;
+        velYRef.current += accY * DT;
+        velYRef.current *= 0.996;
+        posYRef.current += velYRef.current * DT;
+      }
+      drawScene(ctx, canvas, posYRef.current, isDraggingRef.current,
+                stiffnessRef.current, massRef.current, showEqLineRef.current);
+      animId = requestAnimationFrame(animate);
+    }
+    animate();
+
+    return () => {
+      cancelAnimationFrame(animId);
+      canvas.removeEventListener('mousedown', onMouseDown);
+      canvas.removeEventListener('mousemove', onMouseMove);
+      canvas.removeEventListener('mouseup',   onMouseUp);
+    };
+  }, []);
+
+  return (
+    <div style={{
+      minHeight: '100vh',
+      background: '#e8e8e8',
+      display: 'flex',
+      flexDirection: 'column',
+      fontFamily: 'system-ui, sans-serif',
+    }}>
+      {/* Header */}
+      <header style={{
+        padding: '11px 24px',
+        background: '#fff',
+        borderBottom: '1px solid #d1d5db',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '8px',
+      }}>
+        <h1 style={{ margin: 0, fontSize: '14px', fontWeight: 600, color: '#111' }}>
+          Маси &amp; Пружини
+        </h1>
+        <span style={{ color: '#9ca3af', fontSize: '12px' }}>— симулятор коливань</span>
+      </header>
+
+      {/* Body */}
+      <div style={{
+        flex: 1,
+        display: 'flex',
+        gap: '10px',
+        padding: '12px',
+        alignItems: 'stretch',
+      }}>
+
+        {/* ── LEFT PANEL ── */}
+        <aside style={panelStyle}>
+          <div>
+            <Label>Про симулятор</Label>
+            <p style={bodyText}>
+              Модель пружинного маятника на основі закону Гука. Система враховує силу тяжіння,
+              пружну силу та невелике затухання.
+            </p>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Label>Формули</Label>
+            <div style={{ 
+              display: 'flex', flexDirection: 'column', gap: '6px' 
+            }}>
+              {[
+                { name: 'Сила пружини', val: 'F = −k · x' },
+                { name: 'Рівновага',    val: 'x₀ = mg / k' },
+                { name: 'Період',       val: 'T = 2π√(m/k)' },
+                { name: 'Частота',      val: 'f = 1 / T' },
+              ].map(({ name, val }) => (
+                <div key={name} style={{
+                  padding: '7px px',
+                  background: '#f9fafb',
+                  border: '1px solid #e5e7eb',
+                  borderRadius: '7px',
+                }}>
+                  <div style={{ fontSize: '9px', color: '#9ca3af', marginBottom: '2px', textTransform: 'uppercase', letterSpacing: '0.8px' }}>{name}</div>
+                  <div style={{ fontSize: '12px', color: '#111', fontFamily: 'monospace', fontWeight: 600 }}>{val}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Label>Підказка</Label>
+            <p style={bodyText}>
+              Перетягніть блок мишею щоб змістити пружину. Відпустіть — система почне коливатись.
+            </p>
+          </div>
+        </aside>
+
+        {/* ── CANVAS ── */}
+        <div style={{
+          flex: 1,
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: 1024,
+        }}>
+          <canvas
+            ref={canvasRef}
+            width={960}
+            height={712}
+            style={{
+              borderRadius: '10px',
+              border: '1px solid #d1d5db',
+              boxShadow: '0 2px 12px rgba(0,0,0,0.08)',
+              maxWidth: '100%',
+              maxHeight: '100vh',
+              width: 'auto',
+              height: '100vh',
+              display: 'block',
+            }}
+          />
+        </div>
+
+        {/* ── RIGHT PANEL: Controls ── */}
+        <aside style={panelStyle}>
+          <div>
+            <Label>Жорсткість (k)</Label>
+            <div style={{ textAlign: 'center', margin: '6px 0 10px' }}>
+              <span style={{ fontSize: '28px', fontWeight: 700, color: '#111' }}>{stiffness}</span>
+              <span style={{ fontSize: '11px', color: '#9ca3af', marginLeft: '4px' }}>N/m</span>
+            </div>
+            <input
+              type="range" min={1} max={10} step={1} value={stiffness}
+              onChange={e => { setStiffness(Number(e.target.value)); resetSpring(); }}
+              style={{ width: '100%', cursor: 'pointer', accentColor: '#374151' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '3px' }}>
+              <span style={hint}>м'яка</span>
+              <span style={hint}>жорстка</span>
+            </div>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Label>Маса (m)</Label>
+            <div style={{ textAlign: 'center', margin: '6px 0 10px' }}>
+              <span style={{ fontSize: '28px', fontWeight: 700, color: '#111' }}>{Math.round(mass * 1000)}</span>
+              <span style={{ fontSize: '11px', color: '#9ca3af', marginLeft: '4px' }}>g</span>
+            </div>
+            <input
+              type="range" min={0.05} max={0.3} step={0.01} value={mass}
+              onChange={e => { setMass(Number(e.target.value)); resetSpring(); }}
+              style={{ width: '100%', cursor: 'pointer', accentColor: '#374151' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '3px' }}>
+              <span style={hint}>50 g</span>
+              <span style={hint}>300 g</span>
+            </div>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Label>Лінія рівноваги</Label>
+            <button
+              onClick={() => setShowEqLine(v => !v)}
+              style={{
+                width: '100%',
+                padding: '8px',
+                borderRadius: '7px',
+                border: '1px solid #d1d5db',
+                background: showEqLine ? '#111' : '#f9fafb',
+                color: showEqLine ? '#fff' : '#6b7280',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 500,
+                fontFamily: 'system-ui, sans-serif',
+                transition: 'all 0.15s',
+              }}
+            >
+              {showEqLine ? 'Увімкнено' : 'Вимкнено'}
+            </button>
+          </div>
+
+          <Divider />
+
+          <div>
+            <Label>Позиція</Label>
+            <button
+              onClick={resetSpring}
+              style={{
+                width: '100%',
+                padding: '8px',
+                borderRadius: '7px',
+                border: '1px solid #d1d5db',
+                background: '#f9fafb',
+                color: '#374151',
+                cursor: 'pointer',
+                fontSize: '12px',
+                fontWeight: 500,
+                fontFamily: 'system-ui, sans-serif',
+              }}
+              onMouseEnter={e => { e.target.style.background = '#f3f4f6'; }}
+              onMouseLeave={e => { e.target.style.background = '#f9fafb'; }}
+            >
+              Скинути
+            </button>
+          </div>
+        </aside>
+      </div>
+    </div>
+  );
+}
+
+// ── Shared micro-components & styles ──
+function Label({ children }) {
+  return (
+    <div style={{
+      fontSize: '10px', fontWeight: 600, color: '#9ca3af',
+      textTransform: 'uppercase', letterSpacing: '1px', marginBottom: '8px',
+    }}>
+      {children}
+    </div>
+  );
+}
+
+function Divider() {
+  return <div style={{ height: '1px', background: '#e5e7eb' }} />;
+}
+
+const panelStyle = {
+  width: '200px',
+  flexShrink: 0,
+  background: '#fff',
+  border: '1px solid #d1d5db',
+  borderRadius: '10px',
+  padding: '16px',
+  display: 'flex',
+  flexDirection: 'column',
+  gap: '16px',
+};
+
+const bodyText = {
+  margin: 0,
+  fontSize: '12px',
+  color: '#4b5563',
+  lineHeight: 1.7,
+};
+
+const hint = {
+  fontSize: '10px',
+  color: '#9ca3af',
+};
