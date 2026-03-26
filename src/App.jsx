@@ -617,12 +617,12 @@ function Simulator() {
       }}>
         {/* ── Ліва панель: опис, формули, підказка ── */}
         <aside style={{ ...panelStyle, width: LEFT_W }}>
-          <Label>About the simulator</Label>
+          {/* <Label>About the simulator</Label>
           <p style={bodyText}>
             A model of a spring-mass system based on Hooke's law. The system takes into account
             gravity, elastic force, and slight damping.
           </p>
-          <Divider/>
+          <Divider/> */}
 
           <Label>Formulas</Label>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -636,7 +636,7 @@ function Simulator() {
                 padding: "7px 10px",
                 background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 7,
               }}>
-                <div style={{ fontSize: 9, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 2 }}>{name}</div>
+                <div style={{ fontSize: 6, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 2 }}>{name}</div>
                 <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>{val}</div>
               </div>
             ))}
