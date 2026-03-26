@@ -264,7 +264,7 @@ function drawArrow(ctx, x, fromY, toY) {
   ctx.textAlign = "left";
   ctx.textBaseline = "middle";
   ctx.fillStyle = color;
-  ctx.fillText(`${(disp / GRAVITY * 100).toFixed(1)} cm`, x + 12, mid);
+  ctx.fillText(`${(disp / GRAVITY * 100).toFixed(1)} `, x + 12, mid); // відстань у чомусь 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -415,7 +415,6 @@ export default function App() {
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Simulator — головний компонент симулятора
-//
 //  Містить:
 //    • canvas (рендер сцени через requestAnimationFrame)
 //    • ліву панель (опис, формули, підказка)
@@ -443,12 +442,14 @@ function Simulator() {
   const [mass, setMass] = useState(0.1);
   const [showEqLine, setShowEqLine] = useState(true);
   const [showArrow, setShowArrow] = useState(true);
+  const [damped, setDamped] = useState(true); // true = damped, false = undamped
 
   // ── Refs для циклу анімації — завжди містять актуальне значення ──
   const stiffnessRef = useRef(stiffness);
   const massRef = useRef(mass);
   const showEqLineRef = useRef(showEqLine);
   const showArrowRef = useRef(showArrow);
+  const dampedRef = useRef(damped);
 
   // Початкова позиція блоку = рівноважне положення при поточних k і m
   const posYRef = useRef(ANCHOR_Y + REST_LENGTH + (mass * GRAVITY) / stiffness);
@@ -460,6 +461,7 @@ function Simulator() {
   useEffect(() => { massRef.current       = mass;       }, [mass]);
   useEffect(() => { showEqLineRef.current = showEqLine; }, [showEqLine]);
   useEffect(() => { showArrowRef.current  = showArrow;  }, [showArrow]);
+  useEffect(() => { dampedRef.current     = damped;     }, [damped]);
 
   // ── resetSpring — повертає блок у положення рівноваги, обнуляє швидкість
   const resetSpring = useCallback(() => {
@@ -475,7 +477,7 @@ function Simulator() {
   // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
-    const ctx    = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d");
     const CW = canvas.width, CH = canvas.height;
 
     // ── Допоміжні функції для перетворення координат миші ──
@@ -547,14 +549,16 @@ function Simulator() {
     let animId;
     function animate() {
       if (!isDraggingRef.current) {
-        const k       = stiffnessRef.current;
-        const m       = massRef.current;
+        const k = stiffnessRef.current;
+        const m = massRef.current;
         const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH; // поточне розтягнення пружини
-        const accY    = ((-k * stretch) + m * GRAVITY) / m;       // чисте прискорення по Y
-        velYRef.current += accY * DT;                             // оновлюємо швидкість
-        velYRef.current *= 0.996;                                 // затухання: ~0.4% енергії за кадр
-        posYRef.current += velYRef.current * DT;                  // оновлюємо позицію
-      }
+        const accY = ((-k * stretch) + m * GRAVITY) / m;          // чисте прискорення по Y
+        velYRef.current += accY * DT;         
+        if (dampedRef.current){
+          velYRef.current *= 0.996;                              // застосовуємо затухання лише якщо увімкнено демпфер ~0.4% енергії за кадр
+        }
+        posYRef.current += velYRef.current * DT;                // оновлюємо позицію
+      } // Undamped: no multiplication → velocity (and thus amplitude) is preserved exactly
 
       drawScene(
         ctx, CW, CH,
@@ -618,7 +622,7 @@ function Simulator() {
             A model of a spring-mass system based on Hooke's law. The system takes into account
             gravity, elastic force, and slight damping.
           </p>
-          <Divider />
+          <Divider/>
 
           <Label>Formulas</Label>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
@@ -637,7 +641,7 @@ function Simulator() {
               </div>
             ))}
           </div>
-          <Divider />
+          <Divider/>
 
           <Label>Frekvencia</Label>
           <p style={bodyText}>
@@ -677,7 +681,7 @@ function Simulator() {
             </div>
           </div>
 
-          <Divider />
+          <Divider/>
 
           {/* Слайдер маси вантажу (m) */}
           <div>
@@ -698,7 +702,17 @@ function Simulator() {
             </div>
           </div>
 
-          <Divider />
+          <Divider/>
+          {/* ── Damping ── */}
+          <div>
+            <Label>Damping</Label>
+            <ToggleButton active={damped} onToggle={() => setDamped(v => !v)} />
+              <p style={{ ...bodyText, marginTop: 6, fontSize: 10, color: "#9ca3af"}}>
+                {damped
+                  ? "Energy loss per cycle (realistic)"
+                  : "No energy loss — constant amplitude"}
+              </p>
+          </div>
 
           {/* Перемикач: пунктирна лінія положення рівноваги */}
           <div>
@@ -706,8 +720,7 @@ function Simulator() {
             <ToggleButton active={showEqLine} onToggle={() => setShowEqLine(v => !v)} />
           </div>
 
-          <Divider />
-
+          <Divider/>
           {/* Перемикач: стрілка, що показує зміщення від рівноваги */}
           <div>
             <Label>Velocity</Label>
