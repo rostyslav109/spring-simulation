@@ -257,14 +257,14 @@ function drawArrow(ctx, x, fromY, toY) {
   ctx.closePath();
   ctx.fill();
 
-  // Підпис відстані
-  const mid = (fromY + toY) / 2;
-  const disp = Math.abs(toY - fromY);
-  ctx.font = "bold 11px monospace";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "middle";
-  ctx.fillStyle = color;
-  ctx.fillText(`${(disp / GRAVITY * 100).toFixed(1)} `, x + 12, mid); // відстань у чомусь 
+  // // Підпис відстані
+  // const mid = (fromY + toY) / 2;
+  // const disp = Math.abs(toY - fromY);
+  // ctx.font = "bold 11px monospace";
+  // ctx.textAlign = "left";
+  // ctx.textBaseline = "middle";
+  // ctx.fillStyle = color;
+  // ctx.fillText(`${(disp).toFixed(0)} px/s`, x + 12, mid); // відстань у чомусь 
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -283,7 +283,7 @@ function drawArrow(ctx, x, fromY, toY) {
 //    k          — жорсткість пружини
 //    mass       — маса вантажу (кг)
 // ─────────────────────────────────────────────────────────────────────────────
-function drawScene(ctx, cw, ch, blockY, isDragging, k, mass, showEqLine, showArrow) {
+function drawScene(ctx, cw, ch, blockY,velY, isDragging, k, mass, showEqLine, showArrow) {
   // Очищаємо весь canvas перед новим кадром
   ctx.clearRect(0, 0, cw, ch);
 
@@ -347,11 +347,11 @@ function drawScene(ctx, cw, ch, blockY, isDragging, k, mass, showEqLine, showArr
   // лише якщо зміщення більше за 8 px (щоб уникнути мерехтіння)
   if (showArrow) {
     const size = 40 + ((mass - 0.05) / (0.3 - 0.05)) * 50;
-    const eqY = ANCHOR_Y + REST_LENGTH + (mass * GRAVITY) / k;
-    const eqCenter = eqY + size / 2;
     const blockCenter = blockY + size / 2;
-    if (Math.abs(blockCenter - eqCenter) > 8) {
-      drawArrow(ctx, ANCHOR_X + BLOCK_W / 2 + 24, eqCenter, blockCenter);
+    const velScale = 0.15; // px швидкості → px стрілки
+    const arrowLen = velY * velScale*2;
+    if (Math.abs(arrowLen) > 6) {
+      drawArrow(ctx, ANCHOR_X + BLOCK_W / 2 + 24, blockCenter, blockCenter + arrowLen);
     }
   }
 
@@ -443,6 +443,8 @@ function Simulator() {
   const [showEqLine, setShowEqLine] = useState(true);
   const [showArrow, setShowArrow] = useState(true);
   const [damped, setDamped] = useState(true); // true = damped, false = undamped
+  const [slowMo, setSlowMo] = useState(false);
+  const slowMoRef = useRef(false);
 
   // ── Refs для циклу анімації — завжди містять актуальне значення ──
   const stiffnessRef = useRef(stiffness);
@@ -457,11 +459,12 @@ function Simulator() {
   const isDraggingRef = useRef(false);   // мишу ще не натиснуто
 
   // Синхронізуємо refs зі state при кожному рендері
-  useEffect(() => { stiffnessRef.current  = stiffness;  }, [stiffness]);
-  useEffect(() => { massRef.current       = mass;       }, [mass]);
-  useEffect(() => { showEqLineRef.current = showEqLine; }, [showEqLine]);
-  useEffect(() => { showArrowRef.current  = showArrow;  }, [showArrow]);
-  useEffect(() => { dampedRef.current     = damped;     }, [damped]);
+  useEffect(() => { stiffnessRef.current = stiffness;}, [stiffness]);
+  useEffect(() => { massRef.current = mass; }, [mass]);
+  useEffect(() => { showEqLineRef.current = showEqLine;}, [showEqLine]);
+  useEffect(() => { showArrowRef.current  = showArrow;}, [showArrow]);
+  useEffect(() => { dampedRef.current = damped;}, [damped]);
+  useEffect(() => { slowMoRef.current = slowMo;}, [slowMo]);
 
   // ── resetSpring — повертає блок у положення рівноваги, обнуляє швидкість
   const resetSpring = useCallback(() => {
@@ -549,20 +552,28 @@ function Simulator() {
     let animId;
     function animate() {
       if (!isDraggingRef.current) {
+        const dt = slowMoRef.current ? DT * 0.25 : DT;        
         const k = stiffnessRef.current;
         const m = massRef.current;
-        const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH; // поточне розтягнення пружини
-        const accY = ((-k * stretch) + m * GRAVITY) / m;          // чисте прискорення по Y
-        velYRef.current += accY * DT;         
-        if (dampedRef.current){
-          velYRef.current *= 0.996;                              // застосовуємо затухання лише якщо увімкнено демпфер ~0.4% енергії за кадр
+        // const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH; // поточне розтягнення пружини
+        // const accY = ((-k * stretch) + m * GRAVITY) / m;          // чисте прискорення по Y
+        const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH;
+        const accY = ((-k * stretch) + m * GRAVITY) / m;
+        // velYRef.current += accY * DT;  
+        velYRef.current += accY * dt; 
+        if (dampedRef.current) {
+          velYRef.current *= 0.996;
         }
-        posYRef.current += velYRef.current * DT;                // оновлюємо позицію
+        posYRef.current += velYRef.current * dt;       
+        // if (dampedRef.current){
+        //   velYRef.current *= 0.996;                              // застосовуємо затухання лише якщо увімкнено демпфер ~0.4% енергії за кадр
+        // }
+        // posYRef.current += velYRef.current * DT;                // оновлюємо позицію
       } // Undamped: no multiplication → velocity (and thus amplitude) is preserved exactly
 
       drawScene(
         ctx, CW, CH,
-        posYRef.current, isDraggingRef.current,
+        posYRef.current, velYRef.current, isDraggingRef.current,
         stiffnessRef.current, massRef.current,
         showEqLineRef.current, showArrowRef.current
       );
@@ -617,17 +628,17 @@ function Simulator() {
       }}>
         {/* ── Ліва панель: опис, формули, підказка ── */}
         <aside style={{ ...panelStyle, width: LEFT_W }}>
-          {/* <Label>About the simulator</Label>
+          <Label>About the simulator</Label>
           <p style={bodyText}>
             A model of a spring-mass system based on Hooke's law. The system takes into account
             gravity, elastic force, and slight damping.
           </p>
-          <Divider/> */}
+          <Divider/>
 
           <Label>Formulas</Label>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {[
-              { name: "Spring Force", val: "F = −k · x" },
+              { name: "Spring Force", val: damped ? "F = −k·x − c·v" : "F = −k·x", highlight: true},
               { name: "Equilibrium",  val: "x₀ = mg / k" },
               { name: "Period",       val: "T = 2π√(m/k)" },
               { name: "Frequency",    val: "f = 1 / T" },
@@ -643,10 +654,11 @@ function Simulator() {
           </div>
           <Divider/>
 
-          <Label>Frekvencia</Label>
-          <p style={bodyText}>
-            v tejto časti (vľavo bude graf spotreby energie)
-          </p>
+          <Divider />
+          <div>
+            <Label>Playback</Label>
+              <ToggleButton active={slowMo} onToggle={() => setSlowMo(v => !v)} labelOn="0.25×" labelOff="1×" />
+          </div>
         </aside>
 
         {/* ── Canvas — основна зона симуляції ── */}
@@ -754,7 +766,21 @@ function Simulator() {
 
 // ToggleButton — кнопка-перемикач (увімкнено/вимкнено)
 // active=true → чорний фон + білий текст; false → світлий фон + сірий текст
-function ToggleButton({ active, onToggle }) {
+// function ToggleButton({ active, onToggle }) {
+//   return (
+//     <button onClick={onToggle} style={{
+//       width: "100%", padding: "8px", borderRadius: 7,
+//       border: "1px solid #d1d5db",
+//       background: active ? "#111" : "#f9fafb",
+//       color:      active ? "#fff" : "#6b7280",
+//       cursor: "pointer", fontSize: 12, fontWeight: 500,
+//       fontFamily: "system-ui, sans-serif", transition: "all 0.15s",
+//     }}>
+//       {active ? "On" : "Off"}
+//     </button>
+//   );
+// }
+function ToggleButton({ active, onToggle, labelOn = "On", labelOff = "Off" }) {
   return (
     <button onClick={onToggle} style={{
       width: "100%", padding: "8px", borderRadius: 7,
@@ -764,7 +790,7 @@ function ToggleButton({ active, onToggle }) {
       cursor: "pointer", fontSize: 12, fontWeight: 500,
       fontFamily: "system-ui, sans-serif", transition: "all 0.15s",
     }}>
-      {active ? "On" : "Off"}
+      {active ? labelOn : labelOff}
     </button>
   );
 }
