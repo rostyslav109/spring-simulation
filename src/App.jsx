@@ -8,12 +8,16 @@ const BASE_H = 720;    // висота базового вікна (px)
 // ────────────────────
 const ANCHOR_X = 345;     // X-координата точки кріплення пружини до стелі
 const ANCHOR_Y = 30;      // Y-координата точки кріплення (верх пружини)
-const REST_LENGTH = 140;  // довжина пружини у стані спокою без вантажу (px ≈ см)
+const REST_LENGTH = 200;  // довжина пружини у стані спокою без вантажу (px ≈ см)
 const BLOCK_W = 80;       // ширина «хіт-бокса» блоку (для захоплення мишею)
 const BLOCK_H = 80;       // висота «хіт-бокса» блоку
 const GRAVITY = 980;      // прискорення вільного падіння (px/s² → імітує 9.8 м/с²·100)
-const DT = 1 / 60;        // крок часу симуляції: один кадр при 60 FPS (≈16.67 мс)
+const DT = 1 / 70;        // крок часу симуляції: один кадр при 60 FPS (≈16.67 мс)
 
+// Koeficient tlmenia simulácie (velY *= 0.996 → c_eff)
+// b = c / (2m), kde c_eff zodpovedá multiplikátoru 0.996 pri 60 FPS
+// c = -2m * ln(0.996) * 60 ≈ 0.4797 * m  →  b = c/(2m) ≈ 0.2398 s⁻¹
+const DAMPING_COEFF = 0.996; // multiplikátor rýchlosti za krok
 
 function drawSpring(ctx, x, topY, bottomY, k) {
   // Нормалізуємо k до діапазону [0, 1] для інтерполяції візуальних параметрів
@@ -335,12 +339,12 @@ function drawScene(ctx, cw, ch, blockY,velY, isDragging, k, mass, showEqLine, sh
     ctx.stroke();
     ctx.setLineDash([]); // скидаємо пунктир для наступних ліній
 
-    // Підпис «ex.» 
+    // Підпис «eq.» 
     ctx.font         = "11px system-ui";
     ctx.fillStyle    = "rgba(2, 1, 0, 0.9)";
     ctx.textAlign    = "left";
     ctx.textBaseline = "bottom";
-    ctx.fillText("ex.", 210, centerOfBlock - 3);
+    ctx.fillText("eq.", 210, centerOfBlock - 3);
   }
 
   // стрілка зміщення від рівноваги до поточної позиції
@@ -349,7 +353,7 @@ function drawScene(ctx, cw, ch, blockY,velY, isDragging, k, mass, showEqLine, sh
     const size = 40 + ((mass - 0.05) / (0.3 - 0.05)) * 50;
     const blockCenter = blockY + size / 2;
     const velScale = 0.15; // px швидкості → px стрілки
-    const arrowLen = velY * velScale*2;
+    const arrowLen = velY * velScale;
     if (Math.abs(arrowLen) > 6) {
       drawArrow(ctx, ANCHOR_X + BLOCK_W / 2 + 24, blockCenter, blockCenter + arrowLen);
     }
@@ -549,6 +553,7 @@ function Simulator() {
     //    2. Перемальовуємо сцену з новою позицією
     //    3. Плануємо наступний кадр
     // ──────────────────────────────────────────────────────────────────────
+
     let animId;
     function animate() {
       if (!isDraggingRef.current) {
@@ -590,6 +595,20 @@ function Simulator() {
       canvas.removeEventListener("mouseleave", onMouseUp);
     };
   }, []); // [] — виконується лише один раз
+
+
+  // ── Výpočet periódy: tlmená vs netlmená (OPRAVENÉ podľa pokynov)
+  // Netlmená: T = 2π√(m/k)
+  // Tlmená:   T_d = 2π / √(k/m − b²),  kde b = c/(2m), c z DAMPING_COEFF
+  // c_eff ≈ -2m·ln(0.996)·60  → ale pre zobrazenie použijeme typickú hodnotu c = 0.3 N·s/m
+  const C_COEFF  = 0.3; // efektívny koeficient tlmenia (N·s/m) pre vzorec
+  const b        = C_COEFF / (2 * mass);
+  const omega0sq = stiffness / mass;
+  const omegaDsq = omega0sq - b * b;
+  const T_undamped = (2 * Math.PI) / Math.sqrt(omega0sq);
+  const T_damped   = omegaDsq > 0
+    ? (2 * Math.PI) / Math.sqrt(omegaDsq)
+    : null; // prekmitnutie (overdamped)
 
   // ── Розрахунок розмірів панелей та canvas ──
   const LEFT_W   = 300;   // ширина лівої інформаційної панелі
@@ -640,7 +659,7 @@ function Simulator() {
             {[
               { name: "Spring Force", val: damped ? "F = −k·x − c·v" : "F = −k·x", highlight: true},
               { name: "Equilibrium",  val: "x₀ = mg / k" },
-              { name: "Period",       val: "T = 2π√(m/k)" },
+              { name: "Period",       val: damped ? "T = 2π / √(k/m − b²)" : "T = 2π√(m/k)", sub: "b = c/(2m)" },
               { name: "Frequency",    val: "f = 1 / T" },
             ].map(({ name, val }) => (
               <div key={name} style={{
