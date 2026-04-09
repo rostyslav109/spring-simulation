@@ -261,7 +261,7 @@ function drawArrow(ctx, x, fromY, toY) {
   ctx.closePath();
   ctx.fill();
 
-  // // Підпис відстані
+  // Підпис відстані
   // const mid = (fromY + toY) / 2;
   // const disp = Math.abs(toY - fromY);
   // ctx.font = "bold 11px monospace";
@@ -462,6 +462,11 @@ function Simulator() {
   const velYRef = useRef(0);             // початкова швидкість = 0 
   const isDraggingRef = useRef(false);   // мишу ще не натиснуто
 
+  // Energy tracking
+  const [energyVals, setEnergyVals] = useState({ ke: 0, pe: 0, total: 0, heat: 0, ceiling: 1 });
+  const initialEnergyRef = useRef(null); // initial mechanical energy (set on first drag release)
+  const cumulativeHeatRef = useRef(0);   // accumulated heat loss
+
   // Синхронізуємо refs зі state при кожному рендері
   useEffect(() => { stiffnessRef.current = stiffness;}, [stiffness]);
   useEffect(() => { massRef.current = mass; }, [mass]);
@@ -474,6 +479,9 @@ function Simulator() {
   const resetSpring = useCallback(() => {
     posYRef.current = ANCHOR_Y + REST_LENGTH + (massRef.current * GRAVITY) / stiffnessRef.current;
     velYRef.current = 0;
+    initialEnergyRef.current = null;
+    cumulativeHeatRef.current = 0;
+    setEnergyVals({ ke: 0, pe: 0, total: 0, heat: 0, ceiling: 1 });
   }, []);
 
   // ─────────────────────────────────────────────────────────────────────────
@@ -569,7 +577,42 @@ function Simulator() {
         if (dampedRef.current) {
           velYRef.current *= 0.996;
         }
-        posYRef.current += velYRef.current * dt;       
+        posYRef.current += velYRef.current * dt;
+
+        // ── Energy calculation (in simulation units, scaled to Joules-like display)
+        // Equilibrium position (top of block at rest)
+        const eqY_energy = ANCHOR_Y + REST_LENGTH + (m * GRAVITY) / k;
+        // Displacement from equilibrium (in px)
+        const disp = posYRef.current - eqY_energy;
+        // Scale factor: divide by 10000 to bring px-based values into readable range (~0–500)
+        const SCALE = 1 / 10000;
+        // KE = ½mv²
+        const ke = 0.5 * m * velYRef.current * velYRef.current * SCALE;
+        // PE = ½kx²
+        const pe = 0.5 * k * disp * disp * SCALE;
+        const mechanical = ke + pe;
+
+        // Set initial energy on first frame after drag release
+        if (initialEnergyRef.current === null && mechanical > 0.5) {
+          initialEnergyRef.current = mechanical;
+          cumulativeHeatRef.current = 0;
+        }
+        // Accumulate heat loss only in damped mode
+        if (dampedRef.current && initialEnergyRef.current !== null) {
+          const expectedHeat = Math.max(0, initialEnergyRef.current - mechanical);
+          cumulativeHeatRef.current = expectedHeat;
+        }
+
+        // Update state every ~6 frames to avoid excessive re-renders
+        if (Math.random() < 0.30) {
+          setEnergyVals({
+            ke: Math.max(0, ke),
+            pe: Math.max(0, pe),
+            total: Math.max(0, mechanical),
+            heat: dampedRef.current ? Math.max(0, cumulativeHeatRef.current) : 0,
+            ceiling: initialEnergyRef.current ?? Math.max(0, mechanical),
+          });
+        }
         // if (dampedRef.current){
         //   velYRef.current *= 0.996;                              // застосовуємо затухання лише якщо увімкнено демпфер ~0.4% енергії за кадр
         // }
@@ -645,39 +688,73 @@ function Simulator() {
         flex: 1, display: "flex", gap: GAP, padding: PADDING,
         overflow: "hidden", alignItems: "stretch",
       }}>
-        {/* ── Ліва панель: опис, формули, підказка ── */}
-        <aside style={{ ...panelStyle, width: LEFT_W }}>
-          <Label>About the simulator</Label>
-          <p style={bodyText}>
-            A model of a spring-mass system based on Hooke's law. The system takes into account
-            gravity, elastic force, and slight damping.
-          </p>
-          <Divider/>
+        {/* ── Ліва панель: формули + графік енергії ── */}
+        <aside style={{ ...panelStyle, width: LEFT_W, overflow: "hidden", gap: 8 }}>
 
           <Label>Formulas</Label>
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {[
-              { name: "Spring Force", val: damped ? "F = −k·x − c·v" : "F = −k·x", highlight: true},
-              { name: "Equilibrium",  val: "x₀ = mg / k" },
-              { name: "Period",       val: damped ? "T = 2π / √(k/m − b²)" : "T = 2π√(m/k)", sub: "b = c/(2m)" },
-              { name: "Frequency",    val: "f = 1 / T" },
-            ].map(({ name, val }) => (
-              <div key={name} style={{
-                padding: "7px 10px",
-                background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 7,
-              }}>
-                <div style={{ fontSize: 6, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 2 }}>{name}</div>
-                <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>{val}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+            {/* Spring Force */}
+            <div style={{ padding: "5px 10px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 7, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 6, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 1 }}>Spring Force</div>
+                <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>{damped ? "F = −k·x − c·v" : "F = −k·x"}</div>
               </div>
-            ))}
+            </div>
+            {/* Equilibrium */}
+            <div style={{ padding: "5px 10px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 7, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 6, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 1 }}>Equilibrium</div>
+                <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>x₀ = mg / k</div>
+              </div>
+            </div>
+            {/* Period — with calculated value inline */}
+            <div style={{ padding: "5px 10px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 7, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 6, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 1 }}>Period</div>
+                <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>{damped ? "T = 2π / √(k/m − b²)" : "T = 2π√(m/k)"}</div>
+              </div>
+              <div style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 700, color: "#0284c7", marginLeft: 8, whiteSpace: "nowrap" }}>
+                {damped
+                  ? (T_damped !== null ? `${T_damped.toFixed(3)} s` : "over-\ndamped")
+                  : `${T_undamped.toFixed(3)} s`}
+              </div>
+            </div>
+            {/* Frequency — with calculated value inline */}
+            <div style={{ padding: "5px 10px", background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 7, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div>
+                <div style={{ fontSize: 6, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 1 }}>Frequency</div>
+                <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>f = 1 / T</div>
+              </div>
+              <div style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 700, color: "#0284c7", marginLeft: 8, whiteSpace: "nowrap" }}>
+                {damped
+                  ? (T_damped !== null ? `${(1 / T_damped).toFixed(3)} Hz` : "—")
+                  : `${(1 / T_undamped).toFixed(3)} Hz`}
+              </div>
+            </div>
+            {/* Damping coefficient — only when damping is enabled */}
+            {damped && (
+              <div style={{ padding: "5px 10px", background: "#fef9f0", border: "1px solid #fed7aa", borderRadius: 7, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <div style={{ fontSize: 6, color: "#ea580c", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 1 }}>Damping Coeff.</div>
+                  <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>b = c / (2m)</div>
+                </div>
+                <div style={{ fontSize: 12, fontFamily: "monospace", fontWeight: 700, color: "#ea580c", marginLeft: 8, whiteSpace: "nowrap" }}>
+                  {b.toFixed(3)} s⁻¹
+                </div>
+              </div>
+            )}
           </div>
+
           <Divider/>
 
-          <Divider />
-          <div>
-            <Label>Playback</Label>
-              <ToggleButton active={slowMo} onToggle={() => setSlowMo(v => !v)} labelOn="0.25×" labelOff="1×" />
+          {/* Energy chart — fills remaining space */}
+          <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+            <Label>Energy</Label>
+            <div style={{ flex: 1, minHeight: 0 }}>
+              <EnergyChart energyVals={energyVals} damped={damped} />
+            </div>
           </div>
+
         </aside>
 
         {/* ── Canvas — основна зона симуляції ── */}
@@ -695,19 +772,15 @@ function Simulator() {
 
           {/* Слайдер жорсткості пружини (k) */}
           <div>
-            <Label>Stiffness (k)</Label>
-            <div style={{ textAlign: "center", margin: "4px 0 8px" }}>
-              <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>{stiffness}</span>
-              <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 4 }}>N/m</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+              <Label>Stiffness (k)</Label>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>{stiffness} <span style={{ fontSize: 10, color: "#9ca3af", fontWeight: 400 }}>N/m</span></span>
             </div>
             <input type="range" min={1} max={10} step={1} value={stiffness}
-              onChange={e => {
-                setStiffness(Number(e.target.value));
-                resetSpring(); // скидаємо фізику при зміні параметра
-              }}
+              onChange={e => { setStiffness(Number(e.target.value)); resetSpring(); }}
               style={{ width: "100%", cursor: "pointer", accentColor: "#374151" }}
             />
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
               <span style={hint}>soft</span><span style={hint}>hard</span>
             </div>
           </div>
@@ -716,51 +789,55 @@ function Simulator() {
 
           {/* Слайдер маси вантажу (m) */}
           <div>
-            <Label>Mass (m)</Label>
-            <div style={{ textAlign: "center", margin: "4px 0 8px" }}>
-              <span style={{ fontSize: 28, fontWeight: 700, color: "#111" }}>{Math.round(mass * 1000)}</span>
-              <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 4 }}>g</span>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 4 }}>
+              <Label>Mass (m)</Label>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "#111" }}>{Math.round(mass * 1000)} <span style={{ fontSize: 10, color: "#9ca3af", fontWeight: 400 }}>g</span></span>
             </div>
             <input type="range" min={0.05} max={0.3} step={0.01} value={mass}
-              onChange={e => {
-                setMass(Number(e.target.value));
-                resetSpring(); // скидаємо фізику при зміні параметра
-              }}
+              onChange={e => { setMass(Number(e.target.value)); resetSpring(); }}
               style={{ width: "100%", cursor: "pointer", accentColor: "#374151" }}
             />
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 2 }}>
               <span style={hint}>50 g</span><span style={hint}>300 g</span>
             </div>
           </div>
 
           <Divider/>
+
           {/* ── Damping ── */}
           <div>
             <Label>Damping</Label>
-            <ToggleButton active={damped} onToggle={() => setDamped(v => !v)} />
-              <p style={{ ...bodyText, marginTop: 6, fontSize: 10, color: "#9ca3af"}}>
-                {damped
-                  ? "Energy loss per cycle (realistic)"
-                  : "No energy loss — constant amplitude"}
-              </p>
+            <ToggleButton active={damped} onToggle={() => setDamped(v => !v)} small />
+            <p style={{ ...bodyText, marginTop: 4, fontSize: 10, color: "#9ca3af" }}>
+              {damped ? "Energy loss per cycle (realistic)" : "No energy loss — constant amplitude"}
+            </p>
           </div>
 
-          {/* Перемикач: пунктирна лінія положення рівноваги */}
+          {/* Equilibrium line */}
           <div>
             <Label>Equilibrium</Label>
-            <ToggleButton active={showEqLine} onToggle={() => setShowEqLine(v => !v)} />
+            <ToggleButton active={showEqLine} onToggle={() => setShowEqLine(v => !v)} small />
           </div>
 
           <Divider/>
-          {/* Перемикач: стрілка, що показує зміщення від рівноваги */}
+
+          {/* Velocity arrow */}
           <div>
             <Label>Velocity</Label>
-            <ToggleButton active={showArrow} onToggle={() => setShowArrow(v => !v)} />
+            <ToggleButton active={showArrow} onToggle={() => setShowArrow(v => !v)} small />
           </div>
 
           <Divider />
 
-          {/* Кнопка скидання блоку у положення рівноваги */}
+          {/* Playback — above Reset */}
+          <div>
+            <Label>Playback</Label>
+            <ToggleButton active={slowMo} onToggle={() => setSlowMo(v => !v)} labelOn="0.25×" labelOff="1×" small />
+          </div>
+
+          <Divider />
+
+          {/* Reset */}
           <div>
             <Label>Position</Label>
             <button
@@ -799,14 +876,77 @@ function Simulator() {
 //     </button>
 //   );
 // }
-function ToggleButton({ active, onToggle, labelOn = "On", labelOff = "Off" }) {
+// EnergyChart — animated bar chart showing KE, PE, Total (and Heat Loss if damped)
+function EnergyChart({ energyVals, damped }) {
+  const { ke, pe, total, heat, ceiling } = energyVals;
+
+  const bars = damped
+    ? [
+        { label: "KE",   value: ke,    color: "#3b82f6" },
+        { label: "PE",   value: pe,    color: "#eab308" },
+        { label: "ME",   value: total, color: "#22c55e" },
+        { label: "Heat", value: heat,  color: "#ef4444" },
+      ]
+    : [
+        { label: "KE",    value: ke,    color: "#3b82f6" },
+        { label: "PE",    value: pe,    color: "#eab308" },
+        { label: "Total", value: total, color: "#22c55e" },
+      ];
+
+  // Use the initial mechanical energy as a fixed ceiling so bars don't
+  // rescale every frame — the chart stays stable as the oscillator runs.
+  const scale = Math.max(ceiling, 1);
+  const fmtVal = (v) => v < 10 ? `${v.toFixed(1)} J` : `${Math.round(v)} J`;
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
+      {/* Value labels row — fixed, stable */}
+      <div style={{ display: "flex", gap: 4, marginBottom: 6, flexShrink: 0 }}>
+        {bars.map(({ label, value, color }) => (
+          <div key={label} style={{ flex: 1, textAlign: "center" }}>
+            <div style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, color, whiteSpace: "nowrap" }}>
+              {fmtVal(value)}
+            </div>
+          </div>
+        ))}
+      </div>
+      {/* Bars + labels — fills remaining height */}
+      <div style={{ flex: 1, display: "flex", gap: 4, alignItems: "flex-end", minHeight: 0 }}>
+        {bars.map(({ label, value, color }) => {
+          const pct = Math.min(100, Math.max(2, (value / scale) * 100));
+          return (
+            <div key={label} style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%" }}>
+              {/* spacer above bar */}
+              <div style={{ flex: 1 }} />
+              {/* bar itself */}
+              <div style={{
+                width: "100%",
+                height: `${pct}%`,
+                backgroundColor: color,
+                borderRadius: "3px 3px 0 0",
+                transition: "height 0.12s ease-out",
+                minHeight: 2,
+              }} />
+              {/* baseline */}
+              <div style={{ width: "100%", height: 1, backgroundColor: "#d1d5db", flexShrink: 0 }} />
+              {/* label */}
+              <div style={{ textAlign: "center", fontSize: 9, color: "#6b7280", marginTop: 3, fontWeight: 500, flexShrink: 0 }}>{label}</div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function ToggleButton({ active, onToggle, labelOn = "On", labelOff = "Off", small = false }) {
   return (
     <button onClick={onToggle} style={{
-      width: "100%", padding: "8px", borderRadius: 7,
+      width: "100%", padding: small ? "5px" : "8px", borderRadius: 7,
       border: "1px solid #d1d5db",
       background: active ? "#111" : "#f9fafb",
       color:      active ? "#fff" : "#6b7280",
-      cursor: "pointer", fontSize: 12, fontWeight: 500,
+      cursor: "pointer", fontSize: small ? 11 : 12, fontWeight: 500,
       fontFamily: "system-ui, sans-serif", transition: "all 0.15s",
     }}>
       {active ? labelOn : labelOff}
@@ -850,8 +990,8 @@ const hint = { fontSize: 10, color: "#9ca3af" };
 
 // resetBtnStyle — стиль кнопки «Скинути» (без active-стану, тільки base)
 const resetBtnStyle = {
-  width: "100%", padding: "8px", borderRadius: 7,
+  width: "100%", padding: "5px", borderRadius: 7,
   border: "1px solid #d1d5db", background: "#f9fafb",
-  color: "#374151", cursor: "pointer", fontSize: 12,
+  color: "#374151", cursor: "pointer", fontSize: 11,
   fontWeight: 500, fontFamily: "system-ui, sans-serif",
 };

@@ -1,16 +1,18 @@
 import { useRef, useEffect, useState, useCallback } from "react";
 
-const BASE_W = 1280;
-const BASE_H = 720;
+const BASE_W = 1280;   // ширина базового вікна (px)
+const BASE_H = 720;    // висота базового вікна (px)
 
-// ── FYZIKÁLNE KONŠTANTY ──
-const ANCHOR_X = 345;
-const ANCHOR_Y = 30;
-const REST_LENGTH = 200;   // predlžená pokojová poloha (bolo 140) → závaží nižšie
-const BLOCK_W = 80;
-const BLOCK_H = 80;
-const GRAVITY = 980;
-const DT = 1 / 60;
+// ────────────────────
+//  ФІЗИЧНІ КОНСТАНТИ
+// ────────────────────
+const ANCHOR_X = 345;     // X-координата точки кріплення пружини до стелі
+const ANCHOR_Y = 30;      // Y-координата точки кріплення (верх пружини)
+const REST_LENGTH = 200;  // довжина пружини у стані спокою без вантажу (px ≈ см)
+const BLOCK_W = 80;       // ширина «хіт-бокса» блоку (для захоплення мишею)
+const BLOCK_H = 80;       // висота «хіт-бокса» блоку
+const GRAVITY = 980;      // прискорення вільного падіння (px/s² → імітує 9.8 м/с²·100)
+const DT = 1 / 70;        // крок часу симуляції: один кадр при 60 FPS (≈16.67 мс)
 
 // Koeficient tlmenia simulácie (velY *= 0.996 → c_eff)
 // b = c / (2m), kde c_eff zodpovedá multiplikátoru 0.996 pri 60 FPS
@@ -18,17 +20,20 @@ const DT = 1 / 60;
 const DAMPING_COEFF = 0.996; // multiplikátor rýchlosti za krok
 
 function drawSpring(ctx, x, topY, bottomY, k) {
+  // Нормалізуємо k до діапазону [0, 1] для інтерполяції візуальних параметрів
   const t = (k - 1) / (10 - 1);
+
   const coils = Math.round(12 - t * 6);
   const amplitude = 20 + t * 40;
   const thickness = 2 + t * 4;
   const segH = (bottomY - topY) / (coils + 1);
 
+  // ── Основна лінія пружини ──
   ctx.beginPath();
   ctx.moveTo(x, topY);
   for (let i = 0; i <= coils; i++) {
     const yMid  = topY + segH * (i + 0.5);
-    const xOff  = (i % 2 === 0) ? amplitude : -amplitude;
+    const xOff  = (i % 2 === 0) ? amplitude : -amplitude; // чергуємо ліво/право
     const yNext = topY + segH * (i + 1);
     ctx.quadraticCurveTo(x + xOff, yMid, x, yNext);
   }
@@ -56,9 +61,17 @@ function drawSpring(ctx, x, topY, bottomY, k) {
   ctx.stroke();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//    blockX    — X лівого краю «хіт-бокса» (не самого блоку)
+//    blockY    — Y верхнього краю блоку (поточна позиція з фізики)
+//    massKg    — маса в кілограмах (0.05..0.3); визначає візуальний розмір
+// ─────────────────────────────────────────────────────────────────────────────
 function drawBlock(ctx, blockX, blockY, isDragging, massKg) {
+
   const size = 40 + ((massKg - 0.05) / (0.3 - 0.05)) * 50;
   const w = size, h = size;
+
+  // Центруємо блок у межах хіт-бокса BLOCK_W×BLOCK_H
   const centeredX = blockX + (BLOCK_W - w) / 2;
 
   const gradient = ctx.createLinearGradient(centeredX, blockY, centeredX + w, blockY);
@@ -74,17 +87,20 @@ function drawBlock(ctx, blockX, blockY, isDragging, massKg) {
     gradient.addColorStop(1,    "#d97706");
   }
 
+  // заливку блоку
   ctx.fillStyle = gradient;
   ctx.beginPath();
   ctx.roundRect(centeredX, blockY, w, h, 6);
   ctx.fill();
 
+  // рамка
   ctx.strokeStyle = "rgb(0, 0, 0)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.roundRect(centeredX, blockY, w, h, 6);
   ctx.stroke();
 
+  // Підпис маси
   ctx.fillStyle = "rgb(0, 0, 0)";
   ctx.font = `${Math.round((10 + size / 10) / 1.25)}px system-ui`;
   ctx.textAlign = "center";
@@ -93,10 +109,12 @@ function drawBlock(ctx, blockX, blockY, isDragging, massKg) {
 }
 
 function drawCeilingBracket(ctx) {
+
   const w = 160, h = 32;
   const x = ANCHOR_X - w / 2;
   const y = ANCHOR_Y - h;
 
+  // Основна пластина темний металевий градієнт
   const bodyGrad = ctx.createLinearGradient(x, y, x, y + h);
   bodyGrad.addColorStop(0,   "#1a2a4a");
   bodyGrad.addColorStop(0.3, "#1e3a8a");
@@ -107,12 +125,14 @@ function drawCeilingBracket(ctx) {
   ctx.roundRect(x, y, w, h, 6);
   ctx.fill();
 
+  // Зовнішня рамка
   ctx.strokeStyle = "rgba(0, 0, 0, 0.97)";
   ctx.lineWidth = 1;
   ctx.beginPath();
   ctx.roundRect(x + 0.5, y + 0.5, w - 1, h - 1, 6);
   ctx.stroke();
 
+  // Горизонтальне ребро жорсткості
   const ribY = y + h / 2 - 2;
   const ribGrad = ctx.createLinearGradient(x, ribY, x, ribY + 4);
   ribGrad.addColorStop(0, "rgba(255,255,255,0.18)");
@@ -120,6 +140,7 @@ function drawCeilingBracket(ctx) {
   ctx.fillStyle = ribGrad;
   ctx.fillRect(x + 8, ribY, w - 16, 4);
 
+  // Верхній відблиск
   const shineGrad = ctx.createLinearGradient(x, y, x, y + h * 0.45);
   shineGrad.addColorStop(0, "rgba(255,255,255,0.22)");
   shineGrad.addColorStop(1, "rgba(255,255,255,0)");
@@ -128,7 +149,13 @@ function drawCeilingBracket(ctx) {
   ctx.roundRect(x + 1, y + 1, w - 2, h * 0.45, [5, 5, 0, 0]);
   ctx.fill();
 
-  [[x + 12, y + h / 2], [x + w - 12, y + h / 2]].forEach(([bx, by]) => {
+  // Болти по кутах
+  const boltPositions = [
+    [x + 12, y + h / 2],
+    [x + w - 12, y + h / 2],
+  ];
+  boltPositions.forEach(([bx, by]) => {
+    // Зовнішнє кільце болта
     ctx.beginPath();
     ctx.arc(bx, by, 5, 0, Math.PI * 2);
     ctx.fillStyle = "#0f1f4a";
@@ -137,6 +164,7 @@ function drawCeilingBracket(ctx) {
     ctx.lineWidth = 0.8;
     ctx.stroke();
 
+    // Внутрішня голівка болта
     ctx.beginPath();
     ctx.arc(bx, by, 2.5, 0, Math.PI * 2);
     const bGrad = ctx.createRadialGradient(bx - 0.8, by - 0.8, 0.5, bx, by, 2.5);
@@ -145,18 +173,24 @@ function drawCeilingBracket(ctx) {
     ctx.fillStyle = bGrad;
     ctx.fill();
 
+    // Хрестоподібний шліц
     ctx.strokeStyle = "rgba(0,0,0,0.6)";
     ctx.lineWidth = 0.8;
     ctx.beginPath();
-    ctx.moveTo(bx - 1.5, by); ctx.lineTo(bx + 1.5, by);
-    ctx.moveTo(bx, by - 1.5); ctx.lineTo(bx, by + 1.5);
+    ctx.moveTo(bx - 1.5, by);
+    ctx.lineTo(bx + 1.5, by);
+    ctx.moveTo(bx, by - 1.5);
+    ctx.lineTo(bx, by + 1.5);
     ctx.stroke();
   });
 
+  // Вертикальні насічки
   ctx.strokeStyle = "rgba(255,255,255,0.12)";
   ctx.lineWidth = 1;
-  const notchStart = x + 24, notchEnd = x + w - 24, notchCount = 10;
-  const notchStep = (notchEnd - notchStart) / (notchCount - 1);
+  const notchStart = x + 24;
+  const notchEnd   = x + w - 24;
+  const notchCount = 10;
+  const notchStep  = (notchEnd - notchStart) / (notchCount - 1);
   for (let i = 0; i < notchCount; i++) {
     const nx = notchStart + i * notchStep;
     ctx.beginPath();
@@ -165,9 +199,11 @@ function drawCeilingBracket(ctx) {
     ctx.stroke();
   }
 
+  // Нижній опорний виступ
   const tabW = 24, tabH = 8;
   const tabX = ANCHOR_X - tabW / 2;
   const tabY = y + h;
+
   const tabGrad = ctx.createLinearGradient(tabX, tabY, tabX, tabY + tabH);
   tabGrad.addColorStop(0, "#1d4ed8");
   tabGrad.addColorStop(1, "#1e3a8a");
@@ -181,6 +217,7 @@ function drawCeilingBracket(ctx) {
   ctx.roundRect(tabX, tabY, tabW, tabH, [0, 0, 4, 4]);
   ctx.stroke();
 
+  // де пружина чіпляється
   ctx.beginPath();
   ctx.arc(ANCHOR_X, ANCHOR_Y, 4.5, 0, Math.PI * 2);
   ctx.fillStyle = "#0a1630";
@@ -189,121 +226,72 @@ function drawCeilingBracket(ctx) {
   ctx.lineWidth = 1.2;
   ctx.stroke();
 
+  // Блик на кільці
   ctx.beginPath();
   ctx.arc(ANCHOR_X - 1, ANCHOR_Y - 1, 1.5, 0, Math.PI * 2);
   ctx.fillStyle = "rgba(180,210,255,0.6)";
   ctx.fill();
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  drawArrow — малює стрілку зміщення між положенням рівноваги і блоком
+//  Поруч виводиться відстань у сантиметрах (перерахунок: 1 cm ≈ GRAVITY/100 px).
+// ─────────────────────────────────────────────────────────────────────────────
 function drawArrow(ctx, x, fromY, toY) {
-  const dir = Math.sign(toY - fromY);
+  const dir = Math.sign(toY - fromY);               // +1 вниз, -1 вгору
   const color = dir > 0 ? "#ef4444" : "#22c55e";
-  const ah = 10;
+  const ah = 10;                                    // довжина голови стрілки
 
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
   ctx.lineWidth = 2.5;
   ctx.lineCap = "round";
 
+  // Лінія стрілки
   ctx.beginPath();
   ctx.moveTo(x, fromY);
   ctx.lineTo(x, toY - dir * ah);
   ctx.stroke();
 
+  // Голова стрілки
   ctx.beginPath();
   ctx.moveTo(x, toY);
   ctx.lineTo(x - 7, toY - dir * ah);
   ctx.lineTo(x + 7, toY - dir * ah);
   ctx.closePath();
   ctx.fill();
+
+  // Підпис відстані
+  // const mid = (fromY + toY) / 2;
+  // const disp = Math.abs(toY - fromY);
+  // ctx.font = "bold 11px monospace";
+  // ctx.textAlign = "left";
+  // ctx.textBaseline = "middle";
+  // ctx.fillStyle = color;
+  // ctx.fillText(`${(disp).toFixed(0)} px/s`, x + 12, mid); // відстань у чомусь 
 }
 
-// ── Energia: kinetická, potenciálna (pružiny + gravitácie), celková
-function computeEnergy(posY, velY, k, mass) {
-  const eqY = ANCHOR_Y + REST_LENGTH + (mass * GRAVITY) / k;
-  const stretch = posY - ANCHOR_Y - REST_LENGTH;           // roztiahnutie pružiny
-  const eqStretch = (mass * GRAVITY) / k;                 // roztiahnutie v rovnováhe
-  const displacement = posY - eqY;                        // výchylka od rovnováhy
-
-  // Energia pružiny: ½k(x² − x₀²) + mgΔy  →  zjednodušene ½k·displacement²
-  const Ek = 0.5 * mass * velY * velY;
-  const Ep = 0.5 * k * displacement * displacement;
-  const Etotal = Ek + Ep;
-  return { Ek, Ep, Etotal };
-}
-
-// ── Energia panel (vpravo od pružiny, v plátne)
-function drawEnergyPanel(ctx, posY, velY, k, mass, canvasW) {
-  const { Ek, Ep, Etotal } = computeEnergy(posY, velY, k, mass);
-
-  // Maximálna energia pre normalizáciu baru – zoberie sa aktuálne Etotal ak je väčšie
-  const maxE = Math.max(Etotal, 0.001);
-
-  const panelX = canvasW - 130;
-  const panelY = 20;
-  const panelW = 110;
-  const panelH = 120;
-
-  // Pozadie
-  ctx.fillStyle = "rgba(255,255,255,0.85)";
-  ctx.beginPath();
-  ctx.roundRect(panelX, panelY, panelW, panelH, 8);
-  ctx.fill();
-  ctx.strokeStyle = "#d1d5db";
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.roundRect(panelX, panelY, panelW, panelH, 8);
-  ctx.stroke();
-
-  // Nadpis
-  ctx.fillStyle = "#9ca3af";
-  ctx.font = "bold 8px system-ui";
-  ctx.textAlign = "left";
-  ctx.textBaseline = "top";
-  ctx.fillText("ENERGY  (×10⁻³ J)", panelX + 8, panelY + 8);
-
-  const bars = [
-    { label: "Ek", value: Ek,     color: "#3b82f6" },
-    { label: "Ep", value: Ep,     color: "#f59e0b" },
-    { label: "E",  value: Etotal, color: "#10b981" },
-  ];
-
-  const barAreaX = panelX + 8;
-  const barW     = panelW - 16;
-  const barH     = 14;
-  const startY   = panelY + 24;
-  const rowGap   = 28;
-
-  bars.forEach(({ label, value, color }, i) => {
-    const y = startY + i * rowGap;
-    const frac = Math.min(value / maxE, 1);
-
-    // Lišta
-    ctx.fillStyle = "#f3f4f6";
-    ctx.beginPath();
-    ctx.roundRect(barAreaX, y, barW, barH, 3);
-    ctx.fill();
-
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    ctx.roundRect(barAreaX, y, barW * frac, barH, 3);
-    ctx.fill();
-
-    // Hodnota
-    ctx.fillStyle = "#374151";
-    ctx.font = "bold 9px monospace";
-    ctx.textAlign = "left";
-    ctx.textBaseline = "top";
-    ctx.fillText(`${label}`, barAreaX, y + barH + 2);
-
-    ctx.textAlign = "right";
-    ctx.fillText(`${(value * 1000).toFixed(2)}`, barAreaX + barW, y + barH + 2);
-  });
-}
-
-function drawScene(ctx, cw, ch, blockY, velY, isDragging, k, mass, showEqLine, showArrow, showEnergy) {
+// ─────────────────────────────────────────────────────────────────────────────
+//  перемальовка canvas у правильному порядку 
+//    1. Фон (градієнт + точковий патерн)
+//    2. Кронштейн стелі
+//    3. Пружина
+//    4. Вузлик з'єднання (кружечок)
+//    5. Лінія рівноваги (опціонально)
+//    6. Стрілка зміщення (опціонально)
+//    7. Блок (вантаж)
+//    8. Підказка «відпустіть»
+//
+//    cw, ch     — ширина та висота canvas
+//    blockY     — поточна Y-координата верху блоку (з фізичного стану)
+//    k          — жорсткість пружини
+//    mass       — маса вантажу (кг)
+// ─────────────────────────────────────────────────────────────────────────────
+function drawScene(ctx, cw, ch, blockY,velY, isDragging, k, mass, showEqLine, showArrow) {
+  // Очищаємо весь canvas перед новим кадром
   ctx.clearRect(0, 0, cw, ch);
 
+  // ── фоновий градієнт
   const bg = ctx.createLinearGradient(0, 0, 0, ch);
   bg.addColorStop(0, "#f0f4f8");
   bg.addColorStop(1, "#e2e8f0");
@@ -317,27 +305,30 @@ function drawScene(ctx, cw, ch, blockY, velY, isDragging, k, mass, showEqLine, s
   ctx.roundRect(0, 0, cw, ch, 10);
   ctx.stroke();
 
+  // ── декоративна сітка з крапок
   ctx.fillStyle = "rgba(148,163,184,0.22)";
-  for (let y = 18; y < ch; y += 24)
+  for (let y = 18; y < ch; y += 24) {
     for (let x = 18; x < cw; x += 24) {
       ctx.beginPath();
       ctx.arc(x, y, 1.3, 0, Math.PI * 2);
       ctx.fill();
     }
+  }
 
   drawCeilingBracket(ctx);
   drawSpring(ctx, ANCHOR_X, ANCHOR_Y, blockY, k);
 
+  // точка з'єднання пружини і блоку
   ctx.fillStyle = "#1e293b";
   ctx.beginPath();
   ctx.arc(ANCHOR_X, blockY, 5, 0, Math.PI * 2);
   ctx.fill();
 
-  // ── "eq." (opravené z "ex.") – čiarkovaná čiara rovnovážnej polohy
+  // пунктирна лінія рівноваги
   if (showEqLine) {
-    const size = 40 + ((mass - 0.05) / (0.3 - 0.05)) * 50;
-    const eqY = ANCHOR_Y + REST_LENGTH + (mass * GRAVITY) / k;
-    const centerOfBlock = eqY + size / 2;
+    const size = 40 + ((mass - 0.05) / (0.3 - 0.05)) * 50;      // розмір блоку
+    const eqY = ANCHOR_Y + REST_LENGTH + (mass * GRAVITY) / k;  // Y верху блоку в рівновазі
+    const centerOfBlock = eqY + size / 2;                       // Y центру блоку
 
     ctx.setLineDash([14, 12]);
     ctx.strokeStyle = "rgba(0, 0, 0, 0.85)";
@@ -346,62 +337,79 @@ function drawScene(ctx, cw, ch, blockY, velY, isDragging, k, mass, showEqLine, s
     ctx.moveTo(210, centerOfBlock);
     ctx.lineTo(cw - 210, centerOfBlock);
     ctx.stroke();
-    ctx.setLineDash([]);
+    ctx.setLineDash([]); // скидаємо пунктир для наступних ліній
 
-    // ── OPRAVENÉ: "eq." namiesto "ex." ──
-    ctx.font = "11px system-ui";
-    ctx.fillStyle = "rgba(2, 1, 0, 0.9)";
-    ctx.textAlign = "left";
+    // Підпис «eq.» 
+    ctx.font         = "11px system-ui";
+    ctx.fillStyle    = "rgba(2, 1, 0, 0.9)";
+    ctx.textAlign    = "left";
     ctx.textBaseline = "bottom";
     ctx.fillText("eq.", 210, centerOfBlock - 3);
   }
 
+  // стрілка зміщення від рівноваги до поточної позиції
+  // лише якщо зміщення більше за 8 px (щоб уникнути мерехтіння)
   if (showArrow) {
     const size = 40 + ((mass - 0.05) / (0.3 - 0.05)) * 50;
     const blockCenter = blockY + size / 2;
-    const velScale = 0.15;
-    const arrowLen = velY * velScale * 2;
+    const velScale = 0.15; // px швидкості → px стрілки
+    const arrowLen = velY * velScale;
     if (Math.abs(arrowLen) > 6) {
       drawArrow(ctx, ANCHOR_X + BLOCK_W / 2 + 24, blockCenter, blockCenter + arrowLen);
     }
   }
 
-  // ── Panel energie
-  if (showEnergy) {
-    drawEnergyPanel(ctx, blockY, velY, k, mass, cw);
-  }
-
+  //блок — малюємо останнім, поверх пружини 
   drawBlock(ctx, ANCHOR_X - BLOCK_W / 2, blockY, isDragging, mass);
 
+  // підказка під час перетягування 
   if (isDragging) {
-    ctx.fillStyle = "rgba(0, 0, 0, 0.55)";
-    ctx.font = "11px system-ui";
-    ctx.textAlign = "center";
+    ctx.fillStyle    = "rgba(0, 0, 0, 0.55)";
+    ctx.font         = "11px system-ui";
+    ctx.textAlign    = "center";
     ctx.textBaseline = "top";
     ctx.fillText("release to start", ANCHOR_X, blockY + BLOCK_H - 10);
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  App — кореневий компонент, що відповідає за адаптивне масштабування під розмір вікна
+// ─────────────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [viewport, setViewport] = useState({ w: window.innerWidth, h: window.innerHeight });
+  const [viewport, setViewport] = useState({
+    w: window.innerWidth,
+    h: window.innerHeight
+  });
 
+  // Слухаємо зміну розміру вікна
   useEffect(() => {
-    const update = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    const update = () => {
+      setViewport({ w: window.innerWidth, h: window.innerHeight });
+    };
     update();
     window.addEventListener("resize", update);
     return () => window.removeEventListener("resize", update);
   }, []);
 
+  // Рівномірне масштабування: обираємо менший коефіцієнт, щоб вміщувалось по обох осях
   const scale   = Math.min(viewport.w / BASE_W, viewport.h / BASE_H);
   const offsetX = Math.round((viewport.w - BASE_W * scale) / 2);
   const offsetY = Math.round((viewport.h - BASE_H * scale) / 2);
 
   return (
-    <div style={{ width: "100vw", height: "100vh", overflow: "hidden", background: "#e2e8f0", position: "relative" }}>
+    <div style={{
+      width: "100vw", height: "100vh",
+      overflow: "hidden",
+      background: "#e2e8f0",
+      position: "relative",
+    }}>
+      {/* Контейнер масштабування: фіксований розмір BASE_W×BASE_H, трансформований під viewport */}
       <div style={{
-        position: "absolute", top: offsetY, left: offsetX,
+        position: "absolute",
+        top: offsetY, left: offsetX,
         width: BASE_W, height: BASE_H,
-        transform: `scale(${scale})`, transformOrigin: "top left",
+        transform: `scale(${scale})`,
+        transformOrigin: "top left",
       }}>
         <Simulator />
       </div>
@@ -409,47 +417,79 @@ export default function App() {
   );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Simulator — головний компонент симулятора
+//  Містить:
+//    • canvas (рендер сцени через requestAnimationFrame)
+//    • ліву панель (опис, формули, підказка)
+//    • праву панель (слайдери жорсткості і маси, перемикачі, кнопка скиду)
+//
+//  Стан (useState):
+//    stiffness  — жорсткість k (1..10 N/m)
+//    mass       — маса m (0.05..0.30 кг)
+//    showEqLine — показувати лінію рівноваги
+//    showArrow  — показувати стрілку зміщення
+//
+//  Refs (useRef, оновлюються без ре-рендеру):
+//    stiffnessRef / massRef / ... — «живі» значення для циклу анімації
+//    posYRef   — поточна Y-позиція блоку (фізичний стан)
+//    velYRef   — поточна вертикальна швидкість блоку
+//    isDraggingRef — чи захоплено блок мишею
+//
+//  Refs використовуються замість state у циклі анімації,
+//  щоб уникнути застарілих замикань (stale closures) у requestAnimationFrame.
+// ─────────────────────────────────────────────────────────────────────────────
 function Simulator() {
   const canvasRef = useRef(null);
 
-  const [stiffness, setStiffness]   = useState(5);
-  const [mass, setMass]             = useState(0.1);
+  const [stiffness, setStiffness] = useState(5);
+  const [mass, setMass] = useState(0.1);
   const [showEqLine, setShowEqLine] = useState(true);
-  const [showArrow, setShowArrow]   = useState(true);
-  const [showEnergy, setShowEnergy] = useState(true);
-  const [damped, setDamped]         = useState(true);
-  const [slowMo, setSlowMo]         = useState(false);
+  const [showArrow, setShowArrow] = useState(true);
+  const [damped, setDamped] = useState(true); // true = damped, false = undamped
+  const [slowMo, setSlowMo] = useState(false);
+  const slowMoRef = useRef(false);
 
-  const stiffnessRef  = useRef(stiffness);
-  const massRef       = useRef(mass);
+  // ── Refs для циклу анімації — завжди містять актуальне значення ──
+  const stiffnessRef = useRef(stiffness);
+  const massRef = useRef(mass);
   const showEqLineRef = useRef(showEqLine);
-  const showArrowRef  = useRef(showArrow);
-  const showEnergyRef = useRef(showEnergy);
-  const dampedRef     = useRef(damped);
-  const slowMoRef     = useRef(slowMo);
+  const showArrowRef = useRef(showArrow);
+  const dampedRef = useRef(damped);
 
-  const posYRef       = useRef(ANCHOR_Y + REST_LENGTH + (mass * GRAVITY) / stiffness);
-  const velYRef       = useRef(0);
-  const isDraggingRef = useRef(false);
+  // Початкова позиція блоку = рівноважне положення при поточних k і m
+  const posYRef = useRef(ANCHOR_Y + REST_LENGTH + (mass * GRAVITY) / stiffness);
+  const velYRef = useRef(0);             // початкова швидкість = 0 
+  const isDraggingRef = useRef(false);   // мишу ще не натиснуто
 
-  useEffect(() => { stiffnessRef.current  = stiffness;  }, [stiffness]);
-  useEffect(() => { massRef.current       = mass;        }, [mass]);
-  useEffect(() => { showEqLineRef.current = showEqLine;  }, [showEqLine]);
-  useEffect(() => { showArrowRef.current  = showArrow;   }, [showArrow]);
-  useEffect(() => { showEnergyRef.current = showEnergy;  }, [showEnergy]);
-  useEffect(() => { dampedRef.current     = damped;      }, [damped]);
-  useEffect(() => { slowMoRef.current     = slowMo;      }, [slowMo]);
+  // Синхронізуємо refs зі state при кожному рендері
+  useEffect(() => { stiffnessRef.current = stiffness;}, [stiffness]);
+  useEffect(() => { massRef.current = mass; }, [mass]);
+  useEffect(() => { showEqLineRef.current = showEqLine;}, [showEqLine]);
+  useEffect(() => { showArrowRef.current  = showArrow;}, [showArrow]);
+  useEffect(() => { dampedRef.current = damped;}, [damped]);
+  useEffect(() => { slowMoRef.current = slowMo;}, [slowMo]);
 
+  // ── resetSpring — повертає блок у положення рівноваги, обнуляє швидкість
   const resetSpring = useCallback(() => {
     posYRef.current = ANCHOR_Y + REST_LENGTH + (massRef.current * GRAVITY) / stiffnessRef.current;
     velYRef.current = 0;
   }, []);
 
+  // ─────────────────────────────────────────────────────────────────────────
+  //  useEffect — ініціалізація canvas, обробники миші та цикл анімації
+  //
+  //  Виконується один раз при монтуванні компонента (порожній масив []).
+  //  При розмонтуванні (return) скасовує анімацію та знімає обробники.
+  // ─────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     const canvas = canvasRef.current;
-    const ctx    = canvas.getContext("2d");
+    const ctx = canvas.getContext("2d");
     const CW = canvas.width, CH = canvas.height;
 
+    // ── Допоміжні функції для перетворення координат миші ──
+    // canvas.getBoundingClientRect() враховує CSS-масштабування,
+    // тому ділимо на співвідношення «реальний розмір / атрибут width/height»
     function getMouseY(e) {
       const r = canvas.getBoundingClientRect();
       return (e.clientY - r.top) * (CH / r.height);
@@ -458,63 +498,95 @@ function Simulator() {
       const r = canvas.getBoundingClientRect();
       return (e.clientX - r.left) * (CW / r.width);
     }
+
+    // ── Перевірка, чи курсор знаходиться над блоком
     function isOverBlock(mx, my) {
-      const m    = massRef.current;
+      const m = massRef.current;
       const size = 40 + ((m - 0.05) / (0.3 - 0.05)) * 50;
-      const bx   = ANCHOR_X - BLOCK_W / 2 + (BLOCK_W - size) / 2;
+      const bx = ANCHOR_X - BLOCK_W / 2 + (BLOCK_W - size) / 2;
       return my >= posYRef.current - 10 && my <= posYRef.current + size + 10
           && mx >= bx - 10 && mx <= bx + size + 10;
     }
+
+    // Початок перетягування
     function onMouseDown(e) {
       if (isOverBlock(getMouseX(e), getMouseY(e))) {
-        isDraggingRef.current   = true;
-        canvas.style.cursor = "grabbing";
+        isDraggingRef.current = true;
+        canvas.style.cursor   = "grabbing";
       }
     }
+
+    // Переміщення: якщо не тягнемо — змінюємо курсор; якщо тягнемо — оновлюємо позицію
     function onMouseMove(e) {
       const my = getMouseY(e), mx = getMouseX(e);
       if (!isDraggingRef.current) {
         canvas.style.cursor = isOverBlock(mx, my) ? "grab" : "default";
         return;
       }
+      // Центруємо блок відносно курсора миші (BLOCK_H / 2)
       posYRef.current = my - BLOCK_H / 2;
-      velYRef.current = 0;
+      velYRef.current = 0; // обнуляємо швидкість під час тягання
     }
+
+    // Кінець перетягування
     function onMouseUp() {
-      isDraggingRef.current   = false;
-      canvas.style.cursor = "default";
+      isDraggingRef.current = false;
+      canvas.style.cursor   = "default";
     }
 
     canvas.addEventListener("mousedown",  onMouseDown);
     canvas.addEventListener("mousemove",  onMouseMove);
     canvas.addEventListener("mouseup",    onMouseUp);
-    canvas.addEventListener("mouseleave", onMouseUp);
+    canvas.addEventListener("mouseleave", onMouseUp); // страховка — якщо миша залишила canvas
+
+    // ──────────────────────────────────────────────────────────────────────
+    //  Цикл анімації — запускається через requestAnimationFrame (~60 FPS)
+    //
+    //  Кожен кадр:
+    //    1. Якщо не перетягуємо — інтегруємо рівняння руху (метод Ейлера):
+    //         stretch = posY − (ANCHOR_Y + REST_LENGTH)   ← розтяг пружини
+    //         F = −k·stretch + m·g                        ← сила (Гук + гравітація)
+    //         a = F / m                                   ← прискорення (2-й закон Ньютона)
+    //         v += a · dt                                 ← оновлення швидкості
+    //         v *= 0.996                                  ← невелике затухання (демпфер)
+    //         y += v · dt                                 ← оновлення позиції
+    //    2. Перемальовуємо сцену з новою позицією
+    //    3. Плануємо наступний кадр
+    // ──────────────────────────────────────────────────────────────────────
 
     let animId;
     function animate() {
       if (!isDraggingRef.current) {
-        const dt = slowMoRef.current ? DT * 0.25 : DT;
-        const k  = stiffnessRef.current;
-        const m  = massRef.current;
-
+        const dt = slowMoRef.current ? DT * 0.25 : DT;        
+        const k = stiffnessRef.current;
+        const m = massRef.current;
+        // const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH; // поточне розтягнення пружини
+        // const accY = ((-k * stretch) + m * GRAVITY) / m;          // чисте прискорення по Y
         const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH;
-        const accY    = ((-k * stretch) + m * GRAVITY) / m;
-
-        velYRef.current += accY * dt;
-        if (dampedRef.current) velYRef.current *= DAMPING_COEFF;
-        posYRef.current += velYRef.current * dt;
-      }
+        const accY = ((-k * stretch) + m * GRAVITY) / m;
+        // velYRef.current += accY * DT;  
+        velYRef.current += accY * dt; 
+        if (dampedRef.current) {
+          velYRef.current *= 0.996;
+        }
+        posYRef.current += velYRef.current * dt;       
+        // if (dampedRef.current){
+        //   velYRef.current *= 0.996;                              // застосовуємо затухання лише якщо увімкнено демпфер ~0.4% енергії за кадр
+        // }
+        // posYRef.current += velYRef.current * DT;                // оновлюємо позицію
+      } // Undamped: no multiplication → velocity (and thus amplitude) is preserved exactly
 
       drawScene(
         ctx, CW, CH,
         posYRef.current, velYRef.current, isDraggingRef.current,
         stiffnessRef.current, massRef.current,
-        showEqLineRef.current, showArrowRef.current, showEnergyRef.current,
+        showEqLineRef.current, showArrowRef.current
       );
       animId = requestAnimationFrame(animate);
     }
     animate();
 
+    // Cleanup при розмонтуванні компонента
     return () => {
       cancelAnimationFrame(animId);
       canvas.removeEventListener("mousedown",  onMouseDown);
@@ -522,7 +594,8 @@ function Simulator() {
       canvas.removeEventListener("mouseup",    onMouseUp);
       canvas.removeEventListener("mouseleave", onMouseUp);
     };
-  }, []);
+  }, []); // [] — виконується лише один раз
+
 
   // ── Výpočet periódy: tlmená vs netlmená (OPRAVENÉ podľa pokynov)
   // Netlmená: T = 2π√(m/k)
@@ -537,11 +610,14 @@ function Simulator() {
     ? (2 * Math.PI) / Math.sqrt(omegaDsq)
     : null; // prekmitnutie (overdamped)
 
-  const LEFT_W  = 300;
-  const RIGHT_W = 230;
-  const GAP     = 10;
-  const PADDING = 10;
-  const HEADER_H = 44;
+  // ── Розрахунок розмірів панелей та canvas ──
+  const LEFT_W   = 300;   // ширина лівої інформаційної панелі
+  const RIGHT_W  = 230;   // ширина правої панелі керування
+  const GAP      = 10;    // відстань між елементами flex-рядка
+  const PADDING  = 10;    // відступ від країв контейнера
+  const HEADER_H = 44;    // висота шапки
+
+  // Canvas займає решту місця після панелей і відступів
   const CANVAS_W = BASE_W - LEFT_W - RIGHT_W - GAP * 4 - PADDING * 2;
   const CANVAS_H = BASE_H - HEADER_H - PADDING * 2;
 
@@ -553,6 +629,7 @@ function Simulator() {
       fontFamily: "system-ui, sans-serif",
       overflow: "hidden",
     }}>
+      {/* ── Шапка ── */}
       <header style={{
         height: HEADER_H, padding: "0 20px", flexShrink: 0,
         background: "#fff", borderBottom: "1px solid #d1d5db",
@@ -568,69 +645,42 @@ function Simulator() {
         flex: 1, display: "flex", gap: GAP, padding: PADDING,
         overflow: "hidden", alignItems: "stretch",
       }}>
-        {/* ── Ľavá panel ── */}
+        {/* ── Ліва панель: опис, формули, підказка ── */}
         <aside style={{ ...panelStyle, width: LEFT_W }}>
-          <Label>About the simulator</Label>
+          {/* <Label>About the simulator</Label>
           <p style={bodyText}>
             A model of a spring-mass system based on Hooke's law. The system takes into account
             gravity, elastic force, and slight damping.
           </p>
-          <Divider />
+          <Divider/> */}
 
           <Label>Formulas</Label>
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {/* ── Vzorec sily (mení sa podľa tlmenia) */}
-            <FormulaCard name="Spring Force" val={damped ? "F = −k·x − c·v" : "F = −k·x"} highlight />
-
-            {/* ── Rovnovážna poloha – vždy rovnaká */}
-            <FormulaCard name="Equilibrium"  val="x₀ = mg / k" />
-
-            {/* ── OPRAVENÉ: perióda závisí od tlmenia */}
-            {damped ? (
-              <FormulaCard
-                name="Period (damped)"
-                val={`T = 2π / √(k/m − b²)`}
-                sub={`b = c/2m`}
-              />
-            ) : (
-              <FormulaCard name="Period (undamped)" val="T = 2π√(m/k)" />
-            )}
-
-            {/* ── Číselná hodnota periódy */}
-            <div style={{
-              padding: "7px 10px", background: "#f0fdf4",
-              border: "1px solid #bbf7d0", borderRadius: 7,
-            }}>
-              <div style={{ fontSize: 6, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 2 }}>
-                Computed T
+            {[
+              { name: "Spring Force", val: damped ? "F = −k·x − c·v" : "F = −k·x", highlight: true},
+              { name: "Equilibrium",  val: "x₀ = mg / k" },
+              { name: "Period",       val: damped ? "T = 2π / √(k/m − b²)" : "T = 2π√(m/k)", sub: "b = c/(2m)" },
+              { name: "Frequency",    val: "f = 1 / T" },
+            ].map(({ name, val }) => (
+              <div key={name} style={{
+                padding: "7px 10px",
+                background: "#f9fafb", border: "1px solid #e5e7eb", borderRadius: 7,
+              }}>
+                <div style={{ fontSize: 6, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 2 }}>{name}</div>
+                <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>{val}</div>
               </div>
-              {damped ? (
-                omegaDsq > 0
-                  ? <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>
-                      T = {T_damped.toFixed(3)} s
-                    </div>
-                  : <div style={{ fontSize: 11, color: "#ef4444", fontFamily: "monospace" }}>overdamped</div>
-              ) : (
-                <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>
-                  T = {T_undamped.toFixed(3)} s
-                </div>
-              )}
-              <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>
-                f = {damped && omegaDsq > 0
-                  ? (1 / T_damped).toFixed(3)
-                  : (1 / T_undamped).toFixed(3)} Hz
-              </div>
-            </div>
+            ))}
           </div>
-          <Divider />
+          <Divider/>
 
+          <Divider />
           <div>
             <Label>Playback</Label>
-            <ToggleButton active={slowMo} onToggle={() => setSlowMo(v => !v)} labelOn="0.25×" labelOff="1×" />
+              <ToggleButton active={slowMo} onToggle={() => setSlowMo(v => !v)} labelOn="0.25×" labelOff="1×" />
           </div>
         </aside>
 
-        {/* ── Canvas ── */}
+        {/* ── Canvas — основна зона симуляції ── */}
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
           <canvas
             ref={canvasRef}
@@ -640,9 +690,10 @@ function Simulator() {
           />
         </div>
 
-        {/* ── Pravá panel ── */}
+        {/* ── Права панель: слайдери, перемикачі, скид ── */}
         <aside style={{ ...panelStyle, width: RIGHT_W }}>
 
+          {/* Слайдер жорсткості пружини (k) */}
           <div>
             <Label>Stiffness (k)</Label>
             <div style={{ textAlign: "center", margin: "4px 0 8px" }}>
@@ -650,7 +701,10 @@ function Simulator() {
               <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 4 }}>N/m</span>
             </div>
             <input type="range" min={1} max={10} step={1} value={stiffness}
-              onChange={e => { setStiffness(Number(e.target.value)); resetSpring(); }}
+              onChange={e => {
+                setStiffness(Number(e.target.value));
+                resetSpring(); // скидаємо фізику при зміні параметра
+              }}
               style={{ width: "100%", cursor: "pointer", accentColor: "#374151" }}
             />
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
@@ -658,8 +712,9 @@ function Simulator() {
             </div>
           </div>
 
-          <Divider />
+          <Divider/>
 
+          {/* Слайдер маси вантажу (m) */}
           <div>
             <Label>Mass (m)</Label>
             <div style={{ textAlign: "center", margin: "4px 0 8px" }}>
@@ -667,7 +722,10 @@ function Simulator() {
               <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 4 }}>g</span>
             </div>
             <input type="range" min={0.05} max={0.3} step={0.01} value={mass}
-              onChange={e => { setMass(Number(e.target.value)); resetSpring(); }}
+              onChange={e => {
+                setMass(Number(e.target.value));
+                resetSpring(); // скидаємо фізику при зміні параметра
+              }}
               style={{ width: "100%", cursor: "pointer", accentColor: "#374151" }}
             />
             <div style={{ display: "flex", justifyContent: "space-between", marginTop: 3 }}>
@@ -675,37 +733,34 @@ function Simulator() {
             </div>
           </div>
 
-          <Divider />
-
+          <Divider/>
+          {/* ── Damping ── */}
           <div>
             <Label>Damping</Label>
             <ToggleButton active={damped} onToggle={() => setDamped(v => !v)} />
-            <p style={{ ...bodyText, marginTop: 6, fontSize: 10, color: "#9ca3af" }}>
-              {damped
-                ? "Energy loss per cycle (realistic)"
-                : "No energy loss — constant amplitude"}
-            </p>
+              <p style={{ ...bodyText, marginTop: 6, fontSize: 10, color: "#9ca3af"}}>
+                {damped
+                  ? "Energy loss per cycle (realistic)"
+                  : "No energy loss — constant amplitude"}
+              </p>
           </div>
 
+          {/* Перемикач: пунктирна лінія положення рівноваги */}
           <div>
-            <Label>Equilibrium line</Label>
+            <Label>Equilibrium</Label>
             <ToggleButton active={showEqLine} onToggle={() => setShowEqLine(v => !v)} />
           </div>
 
-          <Divider />
-
+          <Divider/>
+          {/* Перемикач: стрілка, що показує зміщення від рівноваги */}
           <div>
-            <Label>Velocity arrow</Label>
+            <Label>Velocity</Label>
             <ToggleButton active={showArrow} onToggle={() => setShowArrow(v => !v)} />
           </div>
 
-          <div>
-            <Label>Energy display</Label>
-            <ToggleButton active={showEnergy} onToggle={() => setShowEnergy(v => !v)} />
-          </div>
-
           <Divider />
 
+          {/* Кнопка скидання блоку у положення рівноваги */}
           <div>
             <Label>Position</Label>
             <button
@@ -717,29 +772,33 @@ function Simulator() {
               Reset
             </button>
           </div>
+
         </aside>
       </div>
     </div>
   );
 }
 
-// ── Pomocné UI komponenty ──
+// ─────────────────────────────────────────────────────────────────────────────
+//  UI-атоми — дрібні допоміжні компоненти
+// ─────────────────────────────────────────────────────────────────────────────
 
-function FormulaCard({ name, val, sub, highlight }) {
-  return (
-    <div style={{
-      padding: "7px 10px",
-      background: highlight ? "#fefce8" : "#f9fafb",
-      border: `1px solid ${highlight ? "#fde68a" : "#e5e7eb"}`,
-      borderRadius: 7,
-    }}>
-      <div style={{ fontSize: 6, color: "#9ca3af", textTransform: "uppercase", letterSpacing: "0.8px", marginBottom: 2 }}>{name}</div>
-      <div style={{ fontSize: 12, color: "#111", fontFamily: "monospace", fontWeight: 600 }}>{val}</div>
-      {sub && <div style={{ fontSize: 10, color: "#6b7280", fontFamily: "monospace", marginTop: 2 }}>{sub}</div>}
-    </div>
-  );
-}
-
+// ToggleButton — кнопка-перемикач (увімкнено/вимкнено)
+// active=true → чорний фон + білий текст; false → світлий фон + сірий текст
+// function ToggleButton({ active, onToggle }) {
+//   return (
+//     <button onClick={onToggle} style={{
+//       width: "100%", padding: "8px", borderRadius: 7,
+//       border: "1px solid #d1d5db",
+//       background: active ? "#111" : "#f9fafb",
+//       color:      active ? "#fff" : "#6b7280",
+//       cursor: "pointer", fontSize: 12, fontWeight: 500,
+//       fontFamily: "system-ui, sans-serif", transition: "all 0.15s",
+//     }}>
+//       {active ? "On" : "Off"}
+//     </button>
+//   );
+// }
 function ToggleButton({ active, onToggle, labelOn = "On", labelOff = "Off" }) {
   return (
     <button onClick={onToggle} style={{
@@ -755,6 +814,7 @@ function ToggleButton({ active, onToggle, labelOn = "On", labelOff = "Off" }) {
   );
 }
 
+// Label — заголовок секції (дрібний, UPPERCASE, сірий)
 function Label({ children }) {
   return (
     <div style={{
@@ -764,10 +824,16 @@ function Label({ children }) {
   );
 }
 
+// Divider — горизонтальний роздільник між секціями панелі
 function Divider() {
   return <div style={{ height: 1, background: "#e5e7eb" }} />;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Спільні стилі (об'єкти, що передаються через style={...})
+// ─────────────────────────────────────────────────────────────────────────────
+
+// panelStyle — базові стилі для лівої та правої бічних панелей
 const panelStyle = {
   flexShrink: 0,
   background: "#fff", border: "1px solid #d1d5db",
@@ -776,8 +842,13 @@ const panelStyle = {
   overflowY: "auto",
 };
 
+// bodyText — стиль основного тексту (опис, підказки)
 const bodyText = { margin: 0, fontSize: 12, color: "#4b5563", lineHeight: 1.7 };
+
+// hint — дрібний підпис (мітки на краях слайдера)
 const hint = { fontSize: 10, color: "#9ca3af" };
+
+// resetBtnStyle — стиль кнопки «Скинути» (без active-стану, тільки base)
 const resetBtnStyle = {
   width: "100%", padding: "8px", borderRadius: 7,
   border: "1px solid #d1d5db", background: "#f9fafb",
