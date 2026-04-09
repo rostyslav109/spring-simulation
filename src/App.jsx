@@ -585,7 +585,7 @@ function Simulator() {
         // Displacement from equilibrium (in px)
         const disp = posYRef.current - eqY_energy;
         // Scale factor: divide by 10000 to bring px-based values into readable range (~0–500)
-        const SCALE = 1 / 10000;
+        const SCALE = 1 / 1000;
         // KE = ½mv²
         const ke = 0.5 * m * velYRef.current * velYRef.current * SCALE;
         // PE = ½kx²
@@ -593,7 +593,7 @@ function Simulator() {
         const mechanical = ke + pe;
 
         // Set initial energy on first frame after drag release
-        if (initialEnergyRef.current === null && mechanical > 0.5) {
+        if (initialEnergyRef.current === null && mechanical > 5) {
           initialEnergyRef.current = mechanical;
           cumulativeHeatRef.current = 0;
         }
