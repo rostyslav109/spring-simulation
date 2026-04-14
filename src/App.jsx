@@ -467,6 +467,9 @@ function Simulator() {
   const initialEnergyRef = useRef(null); // initial mechanical energy (set on first drag release)
   const cumulativeHeatRef = useRef(0);   // accumulated heat loss
 
+  const [isPaused, setIsPaused] = useState(false);
+  const isPausedRef = useRef(false);
+
   // Синхронізуємо refs зі state при кожному рендері
   useEffect(() => { stiffnessRef.current = stiffness;}, [stiffness]);
   useEffect(() => { massRef.current = mass; }, [mass]);
@@ -474,6 +477,7 @@ function Simulator() {
   useEffect(() => { showArrowRef.current  = showArrow;}, [showArrow]);
   useEffect(() => { dampedRef.current = damped;}, [damped]);
   useEffect(() => { slowMoRef.current = slowMo;}, [slowMo]);
+   useEffect(() => { isPausedRef.current = isPaused; }, [isPaused]);
 
   // ── resetSpring — повертає блок у положення рівноваги, обнуляє швидкість
   const resetSpring = useCallback(() => {
@@ -564,69 +568,71 @@ function Simulator() {
 
     let animId;
     function animate() {
-      if (!isDraggingRef.current) {
-        const dt = slowMoRef.current ? DT * 0.25 : DT;        
-        const k = stiffnessRef.current;
-        const m = massRef.current;
-        // const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH; // поточне розтягнення пружини
-        // const accY = ((-k * stretch) + m * GRAVITY) / m;          // чисте прискорення по Y
-        const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH;
-        const accY = ((-k * stretch) + m * GRAVITY) / m;
-        // velYRef.current += accY * DT;  
-        velYRef.current += accY * dt; 
-        if (dampedRef.current) {
-          velYRef.current *= 0.996;
-        }
-        posYRef.current += velYRef.current * dt;
+      if (!isPausedRef.current) {
+        if (!isDraggingRef.current) {
+          const dt = slowMoRef.current ? DT * 0.25 : DT;        
+          const k = stiffnessRef.current;
+          const m = massRef.current;
+          // const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH; // поточне розтягнення пружини
+          // const accY = ((-k * stretch) + m * GRAVITY) / m;          // чисте прискорення по Y
+          const stretch = posYRef.current - ANCHOR_Y - REST_LENGTH;
+          const accY = ((-k * stretch) + m * GRAVITY) / m;
+          // velYRef.current += accY * DT;  
+          velYRef.current += accY * dt; 
+          if (dampedRef.current) {
+            velYRef.current *= 0.996;
+          }
+          posYRef.current += velYRef.current * dt;
 
-        // ── Energy calculation (in simulation units, scaled to Joules-like display)
-        // Equilibrium position (top of block at rest)
-        const eqY_energy = ANCHOR_Y + REST_LENGTH + (m * GRAVITY) / k;
-        // Displacement from equilibrium (in px)
-        const disp = posYRef.current - eqY_energy;
-        // Scale factor: divide by 10000 to bring px-based values into readable range (~0–500)
-        const SCALE = 1 / 1000;
-        // KE = ½mv²
-        const ke = 0.5 * m * velYRef.current * velYRef.current * SCALE;
-        // PE = ½kx²
-        const pe = 0.5 * k * disp * disp * SCALE;
-        const mechanical = ke + pe;
+          // ── Energy calculation (in simulation units, scaled to Joules-like display)
+          // Equilibrium position (top of block at rest)
+          const eqY_energy = ANCHOR_Y + REST_LENGTH + (m * GRAVITY) / k;
+          // Displacement from equilibrium (in px)
+          const disp = posYRef.current - eqY_energy;
+          // Scale factor: divide by 10000 to bring px-based values into readable range (~0–500)
+          const SCALE = 1 / 1000;
+          // KE = ½mv²
+          const ke = 0.5 * m * velYRef.current * velYRef.current * SCALE;
+          // PE = ½kx²
+          const pe = 0.5 * k * disp * disp * SCALE;
+          const mechanical = ke + pe;
 
-        // Set initial energy on first frame after drag release
-        if (initialEnergyRef.current === null && mechanical > 5) {
-          initialEnergyRef.current = mechanical;
-          cumulativeHeatRef.current = 0;
-        }
-        // Accumulate heat loss only in damped mode
-        if (dampedRef.current && initialEnergyRef.current !== null) {
-          const expectedHeat = Math.max(0, initialEnergyRef.current - mechanical);
-          cumulativeHeatRef.current = expectedHeat;
-        }
+          // Set initial energy on first frame after drag release
+          if (initialEnergyRef.current === null && mechanical > 5) {
+            initialEnergyRef.current = mechanical;
+            cumulativeHeatRef.current = 0;
+          }
+          // Accumulate heat loss only in damped mode
+          if (dampedRef.current && initialEnergyRef.current !== null) {
+            const expectedHeat = Math.max(0, initialEnergyRef.current - mechanical);
+            cumulativeHeatRef.current = expectedHeat;
+          }
 
-        // Update state every ~6 frames to avoid excessive re-renders
-        if (Math.random() < 0.30) {
-          setEnergyVals({
-            ke: Math.max(0, ke),
-            pe: Math.max(0, pe),
-            total: Math.max(0, mechanical),
-            heat: dampedRef.current ? Math.max(0, cumulativeHeatRef.current) : 0,
-            ceiling: initialEnergyRef.current ?? Math.max(0, mechanical),
-          });
-        }
-        // if (dampedRef.current){
-        //   velYRef.current *= 0.996;                              // застосовуємо затухання лише якщо увімкнено демпфер ~0.4% енергії за кадр
-        // }
-        // posYRef.current += velYRef.current * DT;                // оновлюємо позицію
-      } // Undamped: no multiplication → velocity (and thus amplitude) is preserved exactly
+          // Update state every ~6 frames to avoid excessive re-renders
+          if (Math.random() < 0.30) {
+            setEnergyVals({
+              ke: Math.max(0, ke),
+              pe: Math.max(0, pe),
+              total: Math.max(0, mechanical),
+              heat: dampedRef.current ? Math.max(0, cumulativeHeatRef.current) : 0,
+              ceiling: initialEnergyRef.current ?? Math.max(0, mechanical),
+            });
+          }
+          // if (dampedRef.current){
+          //   velYRef.current *= 0.996;                              // застосовуємо затухання лише якщо увімкнено демпфер ~0.4% енергії за кадр
+          // }
+          // posYRef.current += velYRef.current * DT;                // оновлюємо позицію
+        } // Undamped: no multiplication → velocity (and thus amplitude) is preserved exactly
+      }
 
-      drawScene(
-        ctx, CW, CH,
-        posYRef.current, velYRef.current, isDraggingRef.current,
-        stiffnessRef.current, massRef.current,
-        showEqLineRef.current, showArrowRef.current
-      );
-      animId = requestAnimationFrame(animate);
-    }
+        drawScene(
+          ctx, CW, CH,
+          posYRef.current, velYRef.current, isDraggingRef.current,
+          stiffnessRef.current, massRef.current,
+          showEqLineRef.current, showArrowRef.current
+        );
+        animId = requestAnimationFrame(animate);
+      }
     animate();
 
     // Cleanup при розмонтуванні компонента
@@ -836,6 +842,22 @@ function Simulator() {
           </div>
 
           <Divider />
+          
+          <div>
+            <Label>Simulation</Label>
+            <button
+              onClick={() => setIsPaused(v => !v)}
+              style={{
+                ...resetBtnStyle,
+                background: isPaused ? "#111" : "#f9fafb",
+                color: isPaused ? "#fff" : "#374151",
+                border: isPaused ? "1px solid #111" : "1px solid #d1d5db",
+                fontWeight: 700,
+              }}
+            >
+              {isPaused ? "▶ Resume" : "⏸ Pause"}
+            </button>
+          </div>
 
           {/* Reset */}
           <div>
@@ -876,64 +898,65 @@ function Simulator() {
 //     </button>
 //   );
 // }
-// EnergyChart — animated bar chart showing KE, PE, Total (and Heat Loss if damped)
+// ─── Energy Bar Chart ─────────────────────────────────────────────────────────
 function EnergyChart({ energyVals, damped }) {
   const { ke, pe, total, heat, ceiling } = energyVals;
+  const scale = Math.max(ceiling, 1);
 
   const bars = damped
     ? [
-        { label: "KE",   value: ke,    color: "#3b82f6" },
-        { label: "PE",   value: pe,    color: "#eab308" },
-        { label: "ME",   value: total, color: "#22c55e" },
-        { label: "Heat", value: heat,  color: "#ef4444" },
+        { label: "Kinetic", value: ke,    color: "#3b82f6" },
+        { label: "Potential", value: pe,  color: "#eab308" },
+        { label: "Mechanical", value: total, color: "#22c55e" },
+        { label: "Heat",    value: heat,  color: "#ef4444" },
       ]
     : [
-        { label: "KE",    value: ke,    color: "#3b82f6" },
-        { label: "PE",    value: pe,    color: "#eab308" },
-        { label: "Total", value: total, color: "#22c55e" },
+        { label: "Kinetic",    value: ke,    color: "#3b82f6" },
+        { label: "Potential",  value: pe,    color: "#eab308" },
+        { label: "Mechanical", value: total, color: "#22c55e" },
       ];
-
-  // Use the initial mechanical energy as a fixed ceiling so bars don't
-  // rescale every frame — the chart stays stable as the oscillator runs.
-  const scale = Math.max(ceiling, 1);
-  const fmtVal = (v) => v < 10 ? `${v.toFixed(1)} J` : `${Math.round(v)} J`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", height: "100%" }}>
-      {/* Value labels row — fixed, stable */}
-      <div style={{ display: "flex", gap: 4, marginBottom: 6, flexShrink: 0 }}>
-        {bars.map(({ label, value, color }) => (
-          <div key={label} style={{ flex: 1, textAlign: "center" }}>
-            <div style={{ fontSize: 9, fontFamily: "monospace", fontWeight: 700, color, whiteSpace: "nowrap" }}>
-              {fmtVal(value)}
-            </div>
-          </div>
-        ))}
-      </div>
-      {/* Bars + labels — fills remaining height */}
-      <div style={{ flex: 1, display: "flex", gap: 4, alignItems: "flex-end", minHeight: 0 }}>
+      {/* Bars row */}
+      <div style={{ flex: 1, display: "flex", gap: damped ? 5 : 8, alignItems: "flex-end", minHeight: 0 }}>
         {bars.map(({ label, value, color }) => {
-          const pct = Math.min(100, Math.max(2, (value / scale) * 100));
+          const pct = Math.min(100, Math.max(1, (value / scale) * 100));
           return (
             <div key={label} style={{ flex: 1, display: "flex", flexDirection: "column", height: "100%" }}>
-              {/* spacer above bar */}
               <div style={{ flex: 1 }} />
-              {/* bar itself */}
               <div style={{
                 width: "100%",
                 height: `${pct}%`,
                 backgroundColor: color,
-                borderRadius: "3px 3px 0 0",
-                transition: "height 0.12s ease-out",
+                borderRadius: "4px 4px 0 0",
+                transition: "height 0.10s ease-out",
                 minHeight: 2,
+                boxShadow: `0 2px 6px ${color}44`,
               }} />
               {/* baseline */}
               <div style={{ width: "100%", height: 1, backgroundColor: "#d1d5db", flexShrink: 0 }} />
-              {/* label */}
-              <div style={{ textAlign: "center", fontSize: 9, color: "#6b7280", marginTop: 3, fontWeight: 500, flexShrink: 0 }}>{label}</div>
             </div>
           );
         })}
+      </div>
+
+      {/* Color swatches + labels */}
+      <div style={{ display: "flex", gap: damped ? 5 : 8, marginTop: 6, flexShrink: 0 }}>
+        {bars.map(({ label, color }) => (
+          <div key={label} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+            <div style={{ width: "100%", height: 3, borderRadius: 2, background: color, opacity: 0.75 }} />
+            <div style={{
+              fontSize: damped ? 8 : 9,
+              color: "#6b7280",
+              textAlign: "center",
+              lineHeight: 1.25,
+              fontWeight: 500,
+            }}>
+              {label}
+            </div>
+          </div>
+        ))}
       </div>
     </div>
   );
